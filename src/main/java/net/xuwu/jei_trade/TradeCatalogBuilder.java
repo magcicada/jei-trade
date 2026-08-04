@@ -40,8 +40,10 @@ import java.util.Set;
 
 /** Builds a deterministic catalog from the actual registered villager trade factories. */
 public final class TradeCatalogBuilder {
-    private static final int RANDOM_VARIANT_SAMPLES = 100;
-    private static final int MERCHANT_ENTITY_SAMPLES = RANDOM_VARIANT_SAMPLES;
+    private static final int NORMAL_VARIANT_SAMPLES = 1;
+    private static final int EXTENDED_VARIANT_SAMPLES = 100;
+    private static final int NORMAL_MERCHANT_ENTITY_SAMPLES = 1;
+    private static final int EXTENDED_MERCHANT_ENTITY_SAMPLES = EXTENDED_VARIANT_SAMPLES;
     private static final int MERCHANT_MIN_SAMPLES = 20;
     private static final int MERCHANT_UNCHANGED_LIMIT = 16;
     private static final int MAX_VARIANTS = 256;
@@ -51,7 +53,7 @@ public final class TradeCatalogBuilder {
 
     /** Builds synchronously for explicit tooling. Runtime code uses {@link Session#advance(long)}. */
     public static List<TradeRecipe> build(Level level) {
-        Session session = new Session(level);
+        Session session = new Session(level, false);
         while (!session.advance(Long.MAX_VALUE / 2)) {
             // An unlimited budget normally completes in one call; keep this safe if that changes.
         }
@@ -59,7 +61,12 @@ public final class TradeCatalogBuilder {
     }
 
     public static Session session(Level level) {
-        return new Session(level);
+        return new Session(level, false);
+    }
+
+    /** Creates the command-only rebuild mode with the full 100-sample random discovery pass. */
+    public static Session extendedSession(Level level) {
+        return new Session(level, true);
     }
 
     /**
@@ -68,6 +75,7 @@ public final class TradeCatalogBuilder {
      */
     public static final class Session {
         private final Level level;
+        private final boolean extendedSampling;
         private final List<ListingTask> listingTasks = new ArrayList<>();
         private final List<EntityType<?>> entityTypes = new ArrayList<>();
         private final Map<String, TradeRecipe> exactEntries = new LinkedHashMap<>();
@@ -77,8 +85,9 @@ public final class TradeCatalogBuilder {
         private MerchantTask merchantTask;
         private boolean complete;
 
-        private Session(Level level) {
+        private Session(Level level, boolean extendedSampling) {
             this.level = level;
+            this.extendedSampling = extendedSampling;
             Registry<VillagerProfession> professions = level.registryAccess()
                     .registryOrThrow(Registries.VILLAGER_PROFESSION);
             ResourceLocation villagerId = new ResourceLocation("minecraft", "villager");
@@ -151,6 +160,16 @@ public final class TradeCatalogBuilder {
             return listingCursor < listingTasks.size() || entityCursor < entityTypes.size();
         }
 
+        private int variantSampleLimit() {
+            return extendedSampling ? EXTENDED_VARIANT_SAMPLES : NORMAL_VARIANT_SAMPLES;
+        }
+
+        private int merchantSampleLimit() {
+            return extendedSampling
+                    ? EXTENDED_MERCHANT_ENTITY_SAMPLES
+                    : NORMAL_MERCHANT_ENTITY_SAMPLES;
+        }
+
         private void mergeExact(TradeRecipe recipe) {
             exactEntries.merge(recipe.fingerprint(), recipe, TradeRecipe::merge);
         }
@@ -185,11 +204,11 @@ public final class TradeCatalogBuilder {
             if (listingCursor < listingTasks.size()) {
                 ListingTask task = listingTasks.get(listingCursor);
                 return "trades " + listingCursor + "/" + listingTasks.size()
-                        + ", sample " + task.sampleNumber() + "/" + RANDOM_VARIANT_SAMPLES;
+                        + ", sample " + task.sampleNumber() + "/" + variantSampleLimit();
             }
             int sample = merchantTask == null ? 0 : merchantTask.sampleNumber();
             return "entities " + entityCursor + "/" + entityTypes.size()
-                    + (sample > 0 ? ", sample " + sample + "/" + MERCHANT_ENTITY_SAMPLES : "");
+                    + (sample > 0 ? ", sample " + sample + "/" + merchantSampleLimit() : "");
         }
 
         public List<TradeRecipe> snapshot() {
@@ -250,7 +269,7 @@ public final class TradeCatalogBuilder {
             } finally {
                 sample++;
             }
-            return sample >= RANDOM_VARIANT_SAMPLES;
+            return sample >= session.variantSampleLimit();
         }
 
         private int sampleNumber() {
@@ -300,7 +319,7 @@ public final class TradeCatalogBuilder {
 
                 samples++;
                 unchangedSamples = changed ? 0 : unchangedSamples + 1;
-                return samples >= MERCHANT_ENTITY_SAMPLES
+                return samples >= session.merchantSampleLimit()
                         || (samples >= MERCHANT_MIN_SAMPLES && unchangedSamples >= MERCHANT_UNCHANGED_LIMIT);
             } catch (RuntimeException | LinkageError ex) {
                 Jei_trade.LOGGER.debug("Could not inspect merchant entity type {}", entityId, ex);
