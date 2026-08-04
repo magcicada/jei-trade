@@ -1,6 +1,7 @@
 package net.xuwu.jei_trade.client;
 
 import mezz.jei.api.gui.builder.IRecipeLayoutBuilder;
+import mezz.jei.api.gui.builder.IRecipeSlotBuilder;
 import mezz.jei.api.gui.drawable.IDrawableStatic;
 import mezz.jei.api.gui.ingredient.IRecipeSlotsView;
 import mezz.jei.api.helpers.IGuiHelper;
@@ -11,8 +12,12 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.resources.language.I18n;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
 import net.minecraft.network.chat.Component;
+import net.minecraft.ChatFormatting;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.item.ItemStack;
 import net.xuwu.jei_trade.Jei_trade;
 import net.xuwu.jei_trade.TradeRecipe;
 import net.xuwu.jei_trade.TradeRecipeGroup;
@@ -48,12 +53,67 @@ final class TradeRecipeCategory extends AbstractRecipeCategory<TradeRecipeGroup>
         for (int index = 0; index < group.trades().size(); index++) {
             TradeRecipe trade = group.trades().get(index);
             int y = HEADER_HEIGHT + index * ROW_HEIGHT;
-            builder.addInputSlot(4, y).setStandardSlotBackground().addItemStacks(trade.buyAVariantsForDisplay());
+            IRecipeSlotBuilder buyA = builder.addInputSlot(4, y).setStandardSlotBackground();
+            buyA.addItemStacks(trade.buyAVariantsForDisplay());
+            addSlotTooltip(buyA, trade, trade.buyAVariants(), trade.buyACountRange(), false);
             if (!trade.buyB().isEmpty()) {
-                builder.addInputSlot(27, y).setStandardSlotBackground().addItemStacks(trade.buyBVariantsForDisplay());
+                IRecipeSlotBuilder buyB = builder.addInputSlot(27, y).setStandardSlotBackground();
+                buyB.addItemStacks(trade.buyBVariantsForDisplay());
+                addSlotTooltip(buyB, trade, trade.buyBVariants(), trade.buyBCountRange(), false);
             }
-            builder.addInputSlot(91, y).setStandardSlotBackground().addItemStacks(trade.resultVariantsForDisplay());
+            IRecipeSlotBuilder result = builder.addOutputSlot(91, y).setStandardSlotBackground();
+            result.addItemStacks(trade.resultVariantsForDisplay());
+            addSlotTooltip(result, trade, trade.resultVariants(), trade.resultCountRange(), true);
         }
+    }
+
+    private static void addSlotTooltip(IRecipeSlotBuilder slot, TradeRecipe trade,
+                                       java.util.List<ItemStack> variants, String countRange,
+                                       boolean includeDetails) {
+        slot.addRichTooltipCallback((view, tooltip) -> {
+            int nbtVariants = trade.nbtVariantCount(variants);
+            if (nbtVariants > 1) {
+                tooltip.add(Component.translatable("jei_trade.nbt_variants", nbtVariants)
+                        .withStyle(ChatFormatting.GRAY));
+                int shown = 0;
+                java.util.Set<String> names = new java.util.LinkedHashSet<>();
+                for (ItemStack variant : variants) {
+                    names.add(variantName(variant));
+                    if (++shown >= 8) break;
+                }
+                for (String name : names) {
+                    tooltip.add(Component.literal("  • " + name).withStyle(ChatFormatting.DARK_GRAY));
+                }
+                if (nbtVariants > names.size()) {
+                    tooltip.add(Component.translatable("jei_trade.nbt_more", nbtVariants - names.size())
+                            .withStyle(ChatFormatting.DARK_GRAY));
+                }
+            }
+            if (!countRange.isEmpty()) {
+                tooltip.add(Component.translatable("jei_trade.count_range", countRange)
+                        .withStyle(ChatFormatting.GOLD));
+            }
+            if (includeDetails) trade.details().forEach(tooltip::add);
+        });
+    }
+
+    private static String variantName(ItemStack stack) {
+        CompoundTag tag = stack.getTag();
+        if (tag != null && tag.contains("StoredEnchantments", 9)) {
+            ListTag enchantments = tag.getList("StoredEnchantments", 10);
+            if (!enchantments.isEmpty()) {
+                CompoundTag enchantment = enchantments.getCompound(0);
+                String id = enchantment.getString("id");
+                int level = enchantment.getShort("lvl");
+                String key = "enchantment." + id.replace(':', '.');
+                return Component.translatable(key).getString() + " " + level;
+            }
+        }
+        String name = stack.getHoverName().getString();
+        if (tag == null || tag.isEmpty()) return name;
+        String suffix = tag.toString();
+        if (suffix.length() > 42) suffix = suffix.substring(0, 39) + "...";
+        return name + " " + suffix;
     }
 
     @Override

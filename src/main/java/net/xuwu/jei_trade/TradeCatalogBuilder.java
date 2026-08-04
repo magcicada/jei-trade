@@ -169,6 +169,9 @@ public final class TradeCatalogBuilder {
                                                     ResourceLocation profession,
                                                     List<ResourceLocation> workstations,
                                                     int level, long seed) {
+        TradeRecipe exact = TradeListingResolver.resolve(listing, entityType, profession, workstations, level);
+        if (exact != null) return exact;
+
         List<TradeRecipe> variants = new ArrayList<>();
         for (int sample = 0; sample < RANDOM_VARIANT_SAMPLES; sample++) {
             try {

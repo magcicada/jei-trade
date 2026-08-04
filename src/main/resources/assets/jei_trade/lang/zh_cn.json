@@ -6,5 +6,14 @@
   "jei_trade.page": "第 %s/%s 页",
   "jei_trade.level": "等级 %s",
   "jei_trade.uses": "使用次数：%s/%s",
-  "jei_trade.max_uses": "上限：%s"
+  "jei_trade.max_uses": "上限：%s",
+  "jei_trade.nbt_variants": "NBT/组件变体：%s 个",
+  "jei_trade.nbt_more": "还有 %s 个变体",
+  "jei_trade.count_range": "数量范围：%s",
+  "jei_trade.detail.random_dye": "输出会随机染色",
+  "jei_trade.detail.random_book_enchant": "输出为随机可交易附魔书",
+  "jei_trade.detail.random_enchant": "输出会随机附魔（等级 %s-%s）",
+  "jei_trade.detail.stew_effect": "效果：%s，持续 %s tick",
+  "jei_trade.detail.treasure_map": "地图类型：%s"
+  ,"jei_trade.detail.villager_type_output": "输出取决于村民外观类型"
 }
