@@ -5,6 +5,7 @@ import net.minecraft.core.Holder;
 import net.minecraft.core.Registry;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.RandomSource;
@@ -12,8 +13,8 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.ai.village.poi.PoiType;
 import net.minecraft.world.entity.npc.Villager;
-import net.minecraft.world.entity.npc.VillagerDataHolder;
 import net.minecraft.world.entity.npc.VillagerData;
+import net.minecraft.world.entity.npc.VillagerDataHolder;
 import net.minecraft.world.entity.npc.VillagerProfession;
 import net.minecraft.world.entity.npc.VillagerTrades;
 import net.minecraft.world.entity.npc.VillagerType;
@@ -32,26 +33,28 @@ import net.minecraft.world.level.block.state.BlockState;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.LinkedHashSet;
 
 /** Builds a deterministic catalog from the actual registered villager trade factories. */
 public final class TradeCatalogBuilder {
     private static final int RANDOM_VARIANT_SAMPLES = 100;
     private static final int MERCHANT_ENTITY_SAMPLES = RANDOM_VARIANT_SAMPLES;
+    private static final int MERCHANT_MIN_SAMPLES = 20;
+    private static final int MERCHANT_UNCHANGED_LIMIT = 16;
+    private static final int MAX_VARIANTS = 256;
 
     private TradeCatalogBuilder() {
     }
 
-    /**
-     * Builds the complete catalog synchronously for callers that explicitly need it.
-     * Server/client lifecycle code should use {@link Session#advance(long)} instead.
-     */
+    /** Builds synchronously for explicit tooling. Runtime code uses {@link Session#advance(long)}. */
     public static List<TradeRecipe> build(Level level) {
         Session session = new Session(level);
-        session.advance(Long.MAX_VALUE / 2);
+        while (!session.advance(Long.MAX_VALUE / 2)) {
+            // An unlimited budget normally completes in one call; keep this safe if that changes.
+        }
         return session.snapshot();
     }
 
@@ -59,15 +62,19 @@ public final class TradeCatalogBuilder {
         return new Session(level);
     }
 
-    /** Incremental catalog builder that performs all Minecraft calls on its owning game thread. */
+    /**
+     * Cooperative catalog builder. Minecraft entity/world calls remain on the server thread, but a
+     * call advances by only one preemptible sampling unit before checking the time budget again.
+     */
     public static final class Session {
         private final Level level;
-        private final List<ListingTask> tasks = new ArrayList<>();
+        private final List<ListingTask> listingTasks = new ArrayList<>();
         private final List<EntityType<?>> entityTypes = new ArrayList<>();
-        private final Set<EntityType<?>> sampledMerchantTypes = new LinkedHashSet<>();
-        private final Map<String, TradeRecipe> entries = new LinkedHashMap<>();
-        private int cursor;
+        private final Map<String, TradeRecipe> exactEntries = new LinkedHashMap<>();
+        private final Map<String, TradeAccumulator> sampledEntries = new LinkedHashMap<>();
+        private int listingCursor;
         private int entityCursor;
+        private MerchantTask merchantTask;
         private boolean complete;
 
         private Session(Level level) {
@@ -89,7 +96,7 @@ public final class TradeCatalogBuilder {
                     if (villager == null) continue;
                     villager.setVillagerData(new VillagerData(VillagerType.PLAINS, profession, levelNumber));
                     for (int index = 0; index < listings.length; index++) {
-                        tasks.add(new ListingTask(villager, listings[index], villagerId, professionId,
+                        listingTasks.add(new ListingTask(villager, listings[index], villagerId, professionId,
                                 workstations, levelNumber, seedFor(professionId, levelNumber, index)));
                     }
                 }
@@ -103,7 +110,7 @@ public final class TradeCatalogBuilder {
                     int levelNumber = levelEntry.getIntKey();
                     VillagerTrades.ItemListing[] listings = levelEntry.getValue();
                     for (int index = 0; index < listings.length; index++) {
-                        tasks.add(new ListingTask(trader, listings[index], wanderingTraderId, null,
+                        listingTasks.add(new ListingTask(trader, listings[index], wanderingTraderId, null,
                                 List.of(), levelNumber, seedFor(wanderingTraderId, levelNumber, index)));
                     }
                 }
@@ -118,88 +125,48 @@ public final class TradeCatalogBuilder {
 
         public boolean advance(long budgetNanos) {
             if (complete) return true;
-            if (cursor >= tasks.size() && entityCursor >= entityTypes.size()) {
-                complete = true;
-                return true;
-            }
-
             long deadline = budgetNanos >= Long.MAX_VALUE / 2
                     ? Long.MAX_VALUE
                     : System.nanoTime() + Math.max(1L, budgetNanos);
-            int start = processedTasks();
-            do {
-                if (cursor < tasks.size()) {
-                    ListingTask task = tasks.get(cursor++);
-                    TradeRecipe recipe = buildListingVariants(task.merchant, task.listing,
-                            task.entityType, task.profession, task.workstations, task.level, task.seed);
-                    if (recipe != null) {
-                        entries.merge(recipe.fingerprint(), recipe, TradeRecipe::merge);
-                    }
-                } else {
-                    scanMerchantEntityType(entityTypes.get(entityCursor++));
-                }
-            } while ((cursor < tasks.size() || entityCursor < entityTypes.size())
-                    && (processedTasks() == start + 1 || System.nanoTime() < deadline));
+            boolean advanced = false;
 
-            complete = cursor >= tasks.size() && entityCursor >= entityTypes.size();
+            while (hasWork() && (!advanced || System.nanoTime() < deadline)) {
+                if (listingCursor < listingTasks.size()) {
+                    if (listingTasks.get(listingCursor).advance(this)) listingCursor++;
+                } else {
+                    if (merchantTask == null) merchantTask = new MerchantTask(entityTypes.get(entityCursor));
+                    if (merchantTask.advance(this)) {
+                        merchantTask = null;
+                        entityCursor++;
+                    }
+                }
+                advanced = true;
+            }
+
+            complete = !hasWork();
             return complete;
         }
 
-        private void scanMerchantEntityType(EntityType<?> type) {
-            ResourceLocation entityId = BuiltInRegistries.ENTITY_TYPE.getKey(type);
-            Entity entity = null;
-            try {
-                entity = type.create(level);
-                if (!(entity instanceof Merchant merchant)) return;
-                boolean firstMerchantSample = sampledMerchantTypes.add(type);
-                MerchantOffers offers = merchant.getOffers();
-                List<MerchantOffer> declaredOffers = firstMerchantSample
-                        ? findDeclaredMerchantOffers(entity, type)
-                        : List.of();
-                if (firstMerchantSample && declaredOffers.isEmpty()) {
-                    scheduleMerchantVariantSamples(type);
-                }
-                if ((offers == null || offers.isEmpty()) && declaredOffers.isEmpty()) return;
-
-                ResourceLocation professionId = null;
-                List<ResourceLocation> workstations = List.of();
-                int merchantLevel = 0;
-                if (merchant instanceof VillagerDataHolder holder) {
-                    VillagerProfession profession = holder.getVillagerData().getProfession();
-                    professionId = level.registryAccess()
-                            .registryOrThrow(Registries.VILLAGER_PROFESSION)
-                            .getKey(profession);
-                    workstations = findWorkstations(level, profession);
-                    merchantLevel = holder.getVillagerData().getLevel();
-                }
-
-                if (offers != null) {
-                    for (MerchantOffer offer : offers) {
-                        mergeOffer(entityId, professionId, workstations, merchantLevel, offer);
-                    }
-                }
-                for (MerchantOffer offer : declaredOffers) {
-                    mergeOffer(entityId, professionId, workstations, merchantLevel, offer);
-                }
-            } catch (RuntimeException | LinkageError ex) {
-                Jei_trade.LOGGER.debug("Could not inspect merchant entity type {}", entityId, ex);
-            } finally {
-                if (entity != null) entity.discard();
-            }
+        private boolean hasWork() {
+            return listingCursor < listingTasks.size() || entityCursor < entityTypes.size();
         }
 
-        private void scheduleMerchantVariantSamples(EntityType<?> type) {
-            for (int sample = 1; sample < MERCHANT_ENTITY_SAMPLES; sample++) {
-                entityTypes.add(type);
-            }
+        private void mergeExact(TradeRecipe recipe) {
+            exactEntries.merge(recipe.fingerprint(), recipe, TradeRecipe::merge);
         }
 
-        private void mergeOffer(ResourceLocation entityId, ResourceLocation professionId,
-                                List<ResourceLocation> workstations, int merchantLevel,
-                                MerchantOffer offer) {
-            TradeRecipe recipe = TradeRecipe.fromOffer(entityId, professionId,
-                    workstations, merchantLevel, offer);
-            entries.merge(recipe.fingerprint(), recipe, TradeRecipe::merge);
+        private boolean acceptOffer(ResourceLocation entityType, ResourceLocation profession,
+                                    List<ResourceLocation> workstations, int merchantLevel,
+                                    MerchantOffer offer) {
+            String key = TradeRecipe.logicalFingerprint(entityType, profession, workstations, merchantLevel,
+                    offer.getCostA(), offer.getCostB(), offer.getResult());
+            TradeAccumulator accumulator = sampledEntries.get(key);
+            if (accumulator == null) {
+                sampledEntries.put(key, new TradeAccumulator(entityType, profession, workstations,
+                        merchantLevel, offer));
+                return true;
+            }
+            return accumulator.accept(offer);
         }
 
         public boolean isComplete() {
@@ -207,20 +174,241 @@ public final class TradeCatalogBuilder {
         }
 
         public int processedTasks() {
-            return cursor + entityCursor;
+            return listingCursor + entityCursor;
         }
 
         public int totalTasks() {
-            return tasks.size() + entityTypes.size();
+            return listingTasks.size() + entityTypes.size();
+        }
+
+        public String progressDescription() {
+            if (listingCursor < listingTasks.size()) {
+                ListingTask task = listingTasks.get(listingCursor);
+                return "trades " + listingCursor + "/" + listingTasks.size()
+                        + ", sample " + task.sampleNumber() + "/" + RANDOM_VARIANT_SAMPLES;
+            }
+            int sample = merchantTask == null ? 0 : merchantTask.sampleNumber();
+            return "entities " + entityCursor + "/" + entityTypes.size()
+                    + (sample > 0 ? ", sample " + sample + "/" + MERCHANT_ENTITY_SAMPLES : "");
         }
 
         public List<TradeRecipe> snapshot() {
-            return List.copyOf(entries.values());
+            Map<String, TradeRecipe> result = new LinkedHashMap<>(exactEntries);
+            for (TradeAccumulator accumulator : sampledEntries.values()) {
+                TradeRecipe recipe = accumulator.build();
+                result.merge(recipe.fingerprint(), recipe, TradeRecipe::merge);
+            }
+            return List.copyOf(result.values());
+        }
+    }
+
+    private static final class ListingTask {
+        private final Entity merchant;
+        private final VillagerTrades.ItemListing listing;
+        private final ResourceLocation entityType;
+        private final ResourceLocation profession;
+        private final List<ResourceLocation> workstations;
+        private final int level;
+        private final long seed;
+        private boolean resolverChecked;
+        private int sample;
+
+        private ListingTask(Entity merchant, VillagerTrades.ItemListing listing,
+                            ResourceLocation entityType, ResourceLocation profession,
+                            List<ResourceLocation> workstations, int level, long seed) {
+            this.merchant = merchant;
+            this.listing = listing;
+            this.entityType = entityType;
+            this.profession = profession;
+            this.workstations = workstations;
+            this.level = level;
+            this.seed = seed;
+        }
+
+        private boolean advance(Session session) {
+            if (!resolverChecked) {
+                resolverChecked = true;
+                TradeRecipe exact = TradeListingResolver.resolve(listing, entityType, profession, workstations, level);
+                if (exact != null) {
+                    session.mergeExact(exact);
+                    return true;
+                }
+            }
+
+            try {
+                MerchantOffer offer = listing.getOffer(merchant, RandomSource.create(seed + sample * 131L));
+                if (offer != null) {
+                    if (offer.getResult().is(Items.ENCHANTED_BOOK)) {
+                        session.mergeExact(expandEnchantedBookVariants(
+                                TradeRecipe.fromOffer(entityType, profession, workstations, level, offer)));
+                        return true;
+                    }
+                    session.acceptOffer(entityType, profession, workstations, level, offer);
+                }
+            } catch (RuntimeException ex) {
+                Jei_trade.LOGGER.debug("Could not create example trade {} level {}", profession, level, ex);
+            } finally {
+                sample++;
+            }
+            return sample >= RANDOM_VARIANT_SAMPLES;
+        }
+
+        private int sampleNumber() {
+            return sample;
+        }
+    }
+
+    private static final class MerchantTask {
+        private final EntityType<?> type;
+        private int samples;
+        private int unchangedSamples;
+
+        private MerchantTask(EntityType<?> type) {
+            this.type = type;
+        }
+
+        private boolean advance(Session session) {
+            ResourceLocation entityId = BuiltInRegistries.ENTITY_TYPE.getKey(type);
+            Entity entity = null;
+            try {
+                entity = type.create(session.level);
+                if (!(entity instanceof Merchant merchant)) return true;
+
+                MerchantOffers offers = merchant.getOffers();
+                List<MerchantOffer> declaredOffers = findDeclaredMerchantOffers(entity, type, samples);
+                ResourceLocation professionId = null;
+                List<ResourceLocation> workstations = List.of();
+                int merchantLevel = 0;
+                if (merchant instanceof VillagerDataHolder holder) {
+                    VillagerProfession profession = holder.getVillagerData().getProfession();
+                    professionId = session.level.registryAccess()
+                            .registryOrThrow(Registries.VILLAGER_PROFESSION)
+                            .getKey(profession);
+                    workstations = findWorkstations(session.level, profession);
+                    merchantLevel = holder.getVillagerData().getLevel();
+                }
+
+                boolean changed = false;
+                if (offers != null) {
+                    for (MerchantOffer offer : offers) {
+                        changed |= session.acceptOffer(entityId, professionId, workstations, merchantLevel, offer);
+                    }
+                }
+                for (MerchantOffer offer : declaredOffers) {
+                    changed |= session.acceptOffer(entityId, professionId, workstations, merchantLevel, offer);
+                }
+
+                samples++;
+                unchangedSamples = changed ? 0 : unchangedSamples + 1;
+                return samples >= MERCHANT_ENTITY_SAMPLES
+                        || (samples >= MERCHANT_MIN_SAMPLES && unchangedSamples >= MERCHANT_UNCHANGED_LIMIT);
+            } catch (RuntimeException | LinkageError ex) {
+                Jei_trade.LOGGER.debug("Could not inspect merchant entity type {}", entityId, ex);
+                return true;
+            } finally {
+                if (entity != null) entity.discard();
+            }
+        }
+
+        private int sampleNumber() {
+            return samples;
+        }
+    }
+
+    private static final class TradeAccumulator {
+        private final ResourceLocation entityType;
+        private final ResourceLocation profession;
+        private final List<ResourceLocation> workstations;
+        private final int level;
+        private final Map<String, ItemStack> buyA = new LinkedHashMap<>();
+        private final Map<String, ItemStack> buyB = new LinkedHashMap<>();
+        private final Map<String, ItemStack> result = new LinkedHashMap<>();
+        private int buyAMin = Integer.MAX_VALUE;
+        private int buyAMax;
+        private int buyBMin = Integer.MAX_VALUE;
+        private int buyBMax;
+        private int resultMin = Integer.MAX_VALUE;
+        private int resultMax;
+        private int uses;
+        private int maxUses;
+        private int xp;
+        private float priceMultiplier;
+        private int demand;
+        private int specialPrice;
+        private boolean rewardExp;
+
+        private TradeAccumulator(ResourceLocation entityType, ResourceLocation profession,
+                                 List<ResourceLocation> workstations, int level, MerchantOffer offer) {
+            this.entityType = entityType;
+            this.profession = profession;
+            this.workstations = List.copyOf(workstations);
+            this.level = level;
+            this.uses = offer.getUses();
+            this.xp = offer.getXp();
+            this.priceMultiplier = offer.getPriceMultiplier();
+            this.demand = offer.getDemand();
+            this.specialPrice = offer.getSpecialPriceDiff();
+            this.rewardExp = offer.shouldRewardExp();
+            accept(offer);
+        }
+
+        private boolean accept(MerchantOffer offer) {
+            boolean changed = addVariant(buyA, offer.getCostA());
+            changed |= addVariant(buyB, offer.getCostB());
+            changed |= addVariant(result, offer.getResult());
+            changed |= updateRanges(offer.getCostA(), offer.getCostB(), offer.getResult());
+            if (offer.getMaxUses() > maxUses) {
+                maxUses = offer.getMaxUses();
+                changed = true;
+            }
+            return changed;
+        }
+
+        private boolean updateRanges(ItemStack costA, ItemStack costB, ItemStack output) {
+            int oldBuyAMin = buyAMin;
+            int oldBuyAMax = buyAMax;
+            int oldBuyBMin = buyBMin;
+            int oldBuyBMax = buyBMax;
+            int oldResultMin = resultMin;
+            int oldResultMax = resultMax;
+            buyAMin = Math.min(buyAMin, count(costA));
+            buyAMax = Math.max(buyAMax, count(costA));
+            buyBMin = Math.min(buyBMin, count(costB));
+            buyBMax = Math.max(buyBMax, count(costB));
+            resultMin = Math.min(resultMin, count(output));
+            resultMax = Math.max(resultMax, count(output));
+            return oldBuyAMin != buyAMin || oldBuyAMax != buyAMax
+                    || oldBuyBMin != buyBMin || oldBuyBMax != buyBMax
+                    || oldResultMin != resultMin || oldResultMax != resultMax;
+        }
+
+        private TradeRecipe build() {
+            return TradeRecipe.fromSamples(entityType, profession, workstations, level,
+                    List.copyOf(buyA.values()), normalizedMin(buyAMin), buyAMax,
+                    List.copyOf(buyB.values()), normalizedMin(buyBMin), buyBMax,
+                    List.copyOf(result.values()), normalizedMin(resultMin), resultMax,
+                    uses, maxUses, xp, priceMultiplier, demand, specialPrice, rewardExp, List.of());
+        }
+
+        private static boolean addVariant(Map<String, ItemStack> variants, ItemStack stack) {
+            String key = TradeRecipe.stackFingerprintIgnoringCount(stack);
+            if (variants.containsKey(key) || variants.size() >= MAX_VARIANTS) return false;
+            variants.put(key, stack.copy());
+            return true;
+        }
+
+        private static int normalizedMin(int value) {
+            return value == Integer.MAX_VALUE ? 0 : value;
+        }
+
+        private static int count(ItemStack stack) {
+            return stack == null || stack.isEmpty() ? 0 : stack.getCount();
         }
     }
 
     /** Reads Goblin Traders' public, data-driven trade table without making it a required dependency. */
-    private static List<MerchantOffer> findDeclaredMerchantOffers(Entity entity, EntityType<?> type) {
+    private static List<MerchantOffer> findDeclaredMerchantOffers(Entity entity, EntityType<?> type,
+                                                                   int sample) {
         ResourceLocation entityId = BuiltInRegistries.ENTITY_TYPE.getKey(type);
         if (entityId == null || !"goblintraders".equals(entityId.getNamespace())) return List.of();
 
@@ -239,21 +427,21 @@ public final class TradeCatalogBuilder {
             Object rawMap = mapAccessor.invoke(entityTrades);
             if (!(rawMap instanceof Map<?, ?> tradeMap)) return List.of();
 
-            List<MerchantOffer> result = new ArrayList<>();
+            List<MerchantOffer> found = new ArrayList<>();
             int index = 0;
             for (Object rawDefinitions : tradeMap.values()) {
                 if (!(rawDefinitions instanceof Iterable<?> definitions)) continue;
                 for (Object definition : definitions) {
-                    RandomSource random = RandomSource.create(seedFor(entityId, 0, index++));
+                    RandomSource random = RandomSource.create(seedFor(entityId, sample, index++));
                     try {
                         MerchantOffer offer = declaredOffer(definition, entity, random);
-                        if (offer != null) result.add(offer);
+                        if (offer != null) found.add(offer);
                     } catch (ReflectiveOperationException | RuntimeException | LinkageError ex) {
                         Jei_trade.LOGGER.debug("Could not inspect declared trade for {}", entityId, ex);
                     }
                 }
             }
-            return List.copyOf(result);
+            return List.copyOf(found);
         } catch (ReflectiveOperationException | RuntimeException | LinkageError ex) {
             Jei_trade.LOGGER.debug("Could not read declared trades for {}", entityId, ex);
             return List.of();
@@ -274,85 +462,39 @@ public final class TradeCatalogBuilder {
         return null;
     }
 
-    private static final class ListingTask {
-        private final Entity merchant;
-        private final VillagerTrades.ItemListing listing;
-        private final ResourceLocation entityType;
-        private final ResourceLocation profession;
-        private final List<ResourceLocation> workstations;
-        private final int level;
-        private final long seed;
-
-        private ListingTask(Entity merchant, VillagerTrades.ItemListing listing,
-                            ResourceLocation entityType, ResourceLocation profession,
-                            List<ResourceLocation> workstations, int level, long seed) {
-            this.merchant = merchant;
-            this.listing = listing;
-            this.entityType = entityType;
-            this.profession = profession;
-            this.workstations = workstations;
-            this.level = level;
-            this.seed = seed;
-        }
-    }
-
-    private static TradeRecipe buildListingVariants(Entity merchant,
-                                                    VillagerTrades.ItemListing listing,
-                                                    ResourceLocation entityType,
-                                                    ResourceLocation profession,
-                                                    List<ResourceLocation> workstations,
-                                                    int level, long seed) {
-        TradeRecipe exact = TradeListingResolver.resolve(listing, entityType, profession, workstations, level);
-        if (exact != null) return exact;
-
-        List<TradeRecipe> variants = new ArrayList<>();
-        for (int sample = 0; sample < RANDOM_VARIANT_SAMPLES; sample++) {
-            try {
-                MerchantOffer offer = listing.getOffer(merchant, RandomSource.create(seed + sample * 131L));
-                if (offer == null) continue;
-                TradeRecipe recipe = TradeRecipe.fromOffer(entityType, profession, workstations, level, offer);
-                if (offer.getResult().is(Items.ENCHANTED_BOOK)) {
-                    // The enchantment itself is expanded exhaustively; further random samples are redundant.
-                    return mergeVariants(expandEnchantedBookVariants(recipe));
-                }
-                variants.add(recipe);
-            } catch (RuntimeException ex) {
-                Jei_trade.LOGGER.debug("Could not create example trade {} level {}", profession, level, ex);
-            }
-        }
-        return mergeVariants(variants);
-    }
-
-    private static TradeRecipe mergeVariants(List<TradeRecipe> variants) {
-        if (variants.isEmpty()) return null;
-        TradeRecipe merged = variants.get(0);
-        for (int i = 1; i < variants.size(); i++) merged = TradeRecipe.merge(merged, variants.get(i));
-        return merged;
-    }
-
-    private static List<TradeRecipe> expandEnchantedBookVariants(TradeRecipe base) {
-        List<TradeRecipe> result = new ArrayList<>();
-        for (Enchantment enchantment : net.minecraft.core.registries.BuiltInRegistries.ENCHANTMENT) {
+    private static TradeRecipe expandEnchantedBookVariants(TradeRecipe base) {
+        List<ItemStack> books = new ArrayList<>();
+        int minEmeralds = Integer.MAX_VALUE;
+        int maxEmeralds = 0;
+        for (Enchantment enchantment : BuiltInRegistries.ENCHANTMENT) {
             if (!enchantment.isTradeable()) continue;
-            for (int level = enchantment.getMinLevel(); level <= enchantment.getMaxLevel(); level++) {
-                ItemStack book = EnchantedBookItem.createForEnchantment(new EnchantmentInstance(enchantment, level));
-                int minCost = 2 + level * 3;
-                int maxCost = Math.min(64, 6 + level * 13);
+            for (int enchantmentLevel = enchantment.getMinLevel();
+                 enchantmentLevel <= enchantment.getMaxLevel(); enchantmentLevel++) {
+                books.add(EnchantedBookItem.createForEnchantment(
+                        new EnchantmentInstance(enchantment, enchantmentLevel)));
+                int minCost = 2 + enchantmentLevel * 3;
+                int maxCost = Math.min(64, 6 + enchantmentLevel * 13);
                 if (enchantment.isTreasureOnly()) {
                     minCost = Math.min(64, minCost * 2);
                     maxCost = Math.min(64, maxCost * 2);
                 }
-                ItemStack lowCost = base.buyA();
-                ItemStack highCost = base.buyA();
-                if (lowCost.is(Items.EMERALD)) {
-                    lowCost.setCount(minCost);
-                    highCost.setCount(maxCost);
-                }
-                result.add(TradeRecipe.withVariantStacks(base, lowCost, base.buyB(), book));
-                result.add(TradeRecipe.withVariantStacks(base, highCost, base.buyB(), book));
+                minEmeralds = Math.min(minEmeralds, minCost);
+                maxEmeralds = Math.max(maxEmeralds, maxCost);
             }
         }
-        return result.isEmpty() ? List.of(base) : result;
+        if (books.isEmpty()) return base;
+
+        int buyAMin = base.buyAMin();
+        int buyAMax = base.buyAMax();
+        if (base.buyA().is(Items.EMERALD)) {
+            buyAMin = minEmeralds;
+            buyAMax = maxEmeralds;
+        }
+        return TradeRecipe.fromSamples(base.entityType(), base.profession(), base.workstations(), base.level(),
+                base.buyAVariants(), buyAMin, buyAMax,
+                base.buyBVariants(), base.buyBMin(), base.buyBMax(),
+                books, 1, 1, base.uses(), base.maxUses(), base.xp(), base.priceMultiplier(),
+                base.demand(), base.specialPrice(), base.rewardExp(), base.details());
     }
 
     public static List<ResourceLocation> findWorkstations(Level level, VillagerProfession profession) {

@@ -7,7 +7,6 @@ import mezz.jei.api.registration.IRecipeRegistration;
 import mezz.jei.api.recipe.IRecipeManager;
 import mezz.jei.api.recipe.RecipeType;
 import mezz.jei.api.runtime.IJeiRuntime;
-import net.minecraft.client.Minecraft;
 import net.minecraft.resources.ResourceLocation;
 import net.xuwu.jei_trade.ClientTradeCatalog;
 import net.xuwu.jei_trade.Jei_trade;
@@ -38,7 +37,6 @@ public final class TradeJeiPlugin implements IModPlugin {
 
     @Override
     public void registerRecipes(IRecipeRegistration registration) {
-        ClientTradeCatalog.ensureFallback(Minecraft.getInstance().level);
         List<TradeRecipeGroup> groups = ClientTradeCatalog.snapshotGroups();
         registration.addRecipes(TRADE_RECIPE_TYPE, groups);
         groups.forEach(group -> REGISTERED_RECIPE_GROUPS.put(group.fingerprint(), group));

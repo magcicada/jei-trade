@@ -118,6 +118,21 @@ public final class TradeRecipe {
                 0, maxUses, xp, priceMultiplier, 0, 0, true, details);
     }
 
+    /** Builds one immutable recipe after a sampling accumulator has finished collecting variants. */
+    static TradeRecipe fromSamples(ResourceLocation entityType, ResourceLocation profession,
+                                   List<ResourceLocation> workstations, int level,
+                                   List<ItemStack> buyAVariants, int buyAMin, int buyAMax,
+                                   List<ItemStack> buyBVariants, int buyBMin, int buyBMax,
+                                   List<ItemStack> resultVariants, int resultMin, int resultMax,
+                                   int uses, int maxUses, int xp, float priceMultiplier,
+                                   int demand, int specialPrice, boolean rewardExp,
+                                   List<Component> details) {
+        return new TradeRecipe(entityType, profession, workstations, level,
+                buyAVariants, buyBVariants, resultVariants,
+                buyAMin, buyAMax, buyBMin, buyBMax, resultMin, resultMax,
+                uses, maxUses, xp, priceMultiplier, demand, specialPrice, rewardExp, details);
+    }
+
     /** Creates a one-variant recipe using the metadata from an existing recipe. */
     public static TradeRecipe withVariantStacks(TradeRecipe base,
                                                 ItemStack buyA, ItemStack buyB, ItemStack result) {
@@ -264,6 +279,12 @@ public final class TradeRecipe {
     public String buyACountRange() { return countRange(buyAMin, buyAMax); }
     public String buyBCountRange() { return countRange(buyBMin, buyBMax); }
     public String resultCountRange() { return countRange(resultMin, resultMax); }
+    int buyAMin() { return buyAMin; }
+    int buyAMax() { return buyAMax; }
+    int buyBMin() { return buyBMin; }
+    int buyBMax() { return buyBMax; }
+    int resultMin() { return resultMin; }
+    int resultMax() { return resultMax; }
     public int uses() { return uses; }
     public int maxUses() { return maxUses; }
     public int xp() { return xp; }
@@ -306,11 +327,16 @@ public final class TradeRecipe {
     }
 
     public String fingerprint() {
+        return logicalFingerprint(entityType, profession, workstations, level,
+                buyAVariants.get(0), buyBVariants.get(0), resultVariants.get(0));
+    }
+
+    static String logicalFingerprint(ResourceLocation entityType, ResourceLocation profession,
+                                     List<ResourceLocation> workstations, int level,
+                                     ItemStack buyA, ItemStack buyB, ItemStack result) {
         return Objects.toString(entityType, "") + '|' + Objects.toString(profession, "") + '|'
                 + workstations + '|' + level + '|'
-                + itemFingerprint(buyA()) + '|'
-                + itemFingerprint(buyB()) + '|'
-                + itemFingerprint(result());
+                + itemFingerprint(buyA) + '|' + itemFingerprint(buyB) + '|' + itemFingerprint(result);
     }
 
     public String variantsFingerprint() {
@@ -346,7 +372,7 @@ public final class TradeRecipe {
         return List.copyOf(result);
     }
 
-    private static String stackFingerprintIgnoringCount(ItemStack stack) {
+    static String stackFingerprintIgnoringCount(ItemStack stack) {
         CompoundTag tag = stack.save(new CompoundTag());
         tag.remove("Count");
         return tag.toString();
