@@ -9,6 +9,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /** A JEI-facing profession/merchant view made from the synchronized offer list. */
 public final class TradeRecipeGroup {
@@ -44,11 +45,7 @@ public final class TradeRecipeGroup {
 
         List<TradeRecipeGroup> result = new ArrayList<>();
         for (Map.Entry<String, List<TradeRecipe>> entry : grouped.entrySet()) {
-            Map<String, TradeRecipe> unique = new LinkedHashMap<>();
-            for (TradeRecipe recipe : entry.getValue()) {
-                unique.merge(recipe.displayFingerprint(), recipe, TradeRecipe::mergeForDisplay);
-            }
-            List<TradeRecipe> sorted = unique.values().stream()
+            List<TradeRecipe> sorted = entry.getValue().stream()
                     .sorted(Comparator.comparingInt(TradeRecipe::level)
                             .thenComparing(TradeRecipe::fingerprint))
                     .toList();
@@ -65,18 +62,9 @@ public final class TradeRecipeGroup {
     }
 
     private static String groupKey(TradeRecipe recipe) {
-        String workstations = recipe.workstations().stream()
-                .distinct()
-                .sorted()
-                .toList()
-                .toString();
-        if (recipe.profession() != null) {
-            return "profession|" + recipe.profession() + '|' + workstations;
-        }
-        if (recipe.entityType() != null) {
-            return "entity|" + recipe.entityType() + '|' + workstations;
-        }
-        return "merchant|" + workstations;
+        return Objects.toString(recipe.entityType(), "") + '|'
+                + Objects.toString(recipe.profession(), "") + '|'
+                + recipe.workstations();
     }
 
     public ResourceLocation entityType() {
@@ -131,5 +119,16 @@ public final class TradeRecipeGroup {
                 .map(TradeRecipe::variantsFingerprint)
                 .reduce((left, right) -> left + ";" + right)
                 .orElse("");
+    }
+
+    @Override
+    public boolean equals(Object object) {
+        return this == object || object instanceof TradeRecipeGroup other
+                && fingerprint().equals(other.fingerprint());
+    }
+
+    @Override
+    public int hashCode() {
+        return fingerprint().hashCode();
     }
 }

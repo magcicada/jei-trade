@@ -35,14 +35,6 @@ public final class ClientTradeCatalog {
         }
     }
 
-    /** Disables the client-side fallback once a live server connection can provide the catalog. */
-    public static synchronized void preferServerCatalog() {
-        if (serverAuthoritative) return;
-        ENTRIES.clear();
-        fallbackSession = null;
-        fallbackBuilt = true;
-    }
-
     public static synchronized void advanceFallback(Level level) {
         ensureFallback(level);
         if (serverAuthoritative || fallbackSession == null) return;

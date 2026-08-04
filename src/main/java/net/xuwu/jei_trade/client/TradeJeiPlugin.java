@@ -2,7 +2,6 @@ package net.xuwu.jei_trade.client;
 
 import mezz.jei.api.IModPlugin;
 import mezz.jei.api.JeiPlugin;
-import mezz.jei.api.registration.IAdvancedRegistration;
 import mezz.jei.api.registration.IRecipeCategoryRegistration;
 import mezz.jei.api.registration.IRecipeRegistration;
 import mezz.jei.api.recipe.IRecipeManager;
@@ -39,21 +38,10 @@ public final class TradeJeiPlugin implements IModPlugin {
 
     @Override
     public void registerRecipes(IRecipeRegistration registration) {
-        Minecraft minecraft = Minecraft.getInstance();
-        if (minecraft.getConnection() == null) {
-            ClientTradeCatalog.ensureFallback(minecraft.level);
-        }
+        ClientTradeCatalog.ensureFallback(Minecraft.getInstance().level);
         List<TradeRecipeGroup> groups = ClientTradeCatalog.snapshotGroups();
-        List<TradeRecipeGroup> pending = groups.stream()
-                .filter(group -> !REGISTERED_RECIPE_GROUPS.containsKey(group.fingerprint()))
-                .toList();
-        if (!pending.isEmpty()) registration.addRecipes(TRADE_RECIPE_TYPE, pending);
-        pending.forEach(group -> REGISTERED_RECIPE_GROUPS.put(group.fingerprint(), group));
-    }
-
-    @Override
-    public void registerAdvanced(IAdvancedRegistration registration) {
-        registration.addTypedRecipeManagerPlugin(TRADE_RECIPE_TYPE, new TradeRecipeManagerPlugin());
+        registration.addRecipes(TRADE_RECIPE_TYPE, groups);
+        groups.forEach(group -> REGISTERED_RECIPE_GROUPS.put(group.fingerprint(), group));
     }
 
     @Override

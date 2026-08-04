@@ -132,22 +132,7 @@ public final class TradeRecipe {
     /** Combines random/NBT variants of the same logical trade without losing any stack. */
     public static TradeRecipe merge(TradeRecipe left, TradeRecipe right) {
         if (!left.fingerprint().equals(right.fingerprint())) return left;
-        return mergeData(left, right, left.entityType, left.profession, left.workstations);
-    }
-
-    /** Merges duplicate display entries that differ only in their source metadata. */
-    public static TradeRecipe mergeForDisplay(TradeRecipe left, TradeRecipe right) {
-        ResourceLocation entityType = left.entityType != null ? left.entityType : right.entityType;
-        ResourceLocation profession = left.profession != null ? left.profession : right.profession;
-        List<ResourceLocation> workstations = left.workstations.isEmpty()
-                ? right.workstations : left.workstations;
-        return mergeData(left, right, entityType, profession, workstations);
-    }
-
-    private static TradeRecipe mergeData(TradeRecipe left, TradeRecipe right,
-                                         ResourceLocation entityType, ResourceLocation profession,
-                                         List<ResourceLocation> workstations) {
-        return new TradeRecipe(entityType, profession, workstations, left.level,
+        return new TradeRecipe(left.entityType, left.profession, left.workstations, left.level,
                 union(left.buyAVariants, right.buyAVariants),
                 union(left.buyBVariants, right.buyBVariants),
                 union(left.resultVariants, right.resultVariants),
@@ -332,12 +317,6 @@ public final class TradeRecipe {
         return fingerprint() + '|' + buyAVariants.stream().map(TradeRecipe::stackFingerprint).toList()
                 + '|' + buyBVariants.stream().map(TradeRecipe::stackFingerprint).toList()
                 + '|' + resultVariants.stream().map(TradeRecipe::stackFingerprint).toList();
-    }
-
-    /** Stable key for collapsing duplicate rows that have different source metadata. */
-    String displayFingerprint() {
-        return level + '|' + stackFingerprintIgnoringCount(buyA()) + '|'
-                + stackFingerprintIgnoringCount(buyB()) + '|' + itemFingerprint(result());
     }
 
     private static String countRange(int min, int max) {
