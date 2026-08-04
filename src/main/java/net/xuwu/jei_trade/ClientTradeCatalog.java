@@ -16,6 +16,7 @@ public final class ClientTradeCatalog {
     private static final Map<String, TradeRecipe> ENTRIES = new LinkedHashMap<>();
     private static boolean fallbackBuilt;
     private static boolean serverAuthoritative;
+    private static TradeCatalogBuilder.Session fallbackSession;
 
     private ClientTradeCatalog() {
     }
@@ -23,13 +24,23 @@ public final class ClientTradeCatalog {
     public static synchronized void replace(List<TradeRecipe> recipes) {
         ENTRIES.clear();
         for (TradeRecipe recipe : recipes) add(recipe);
+        fallbackSession = null;
         fallbackBuilt = true;
         serverAuthoritative = true;
     }
 
     public static synchronized void ensureFallback(Level level) {
-        if (!fallbackBuilt && level != null) {
-            addAll(TradeCatalogBuilder.build(level));
+        if (!fallbackBuilt && !serverAuthoritative && level != null && fallbackSession == null) {
+            fallbackSession = TradeCatalogBuilder.session(level);
+        }
+    }
+
+    public static synchronized void advanceFallback(Level level) {
+        ensureFallback(level);
+        if (serverAuthoritative || fallbackSession == null) return;
+        if (fallbackSession.advance(2_000_000L)) {
+            addAll(fallbackSession.snapshot());
+            fallbackSession = null;
             fallbackBuilt = true;
         }
     }
@@ -77,6 +88,7 @@ public final class ClientTradeCatalog {
 
     public static synchronized void clear() {
         ENTRIES.clear();
+        fallbackSession = null;
         fallbackBuilt = false;
         serverAuthoritative = false;
     }

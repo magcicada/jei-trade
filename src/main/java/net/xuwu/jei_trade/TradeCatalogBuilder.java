@@ -7,17 +7,18 @@ import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.RandomSource;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.ai.village.poi.PoiType;
 import net.minecraft.world.entity.npc.Villager;
 import net.minecraft.world.entity.npc.VillagerData;
 import net.minecraft.world.entity.npc.VillagerProfession;
 import net.minecraft.world.entity.npc.VillagerTrades;
 import net.minecraft.world.entity.npc.VillagerType;
 import net.minecraft.world.entity.npc.WanderingTrader;
-import net.minecraft.world.entity.ai.village.poi.PoiType;
 import net.minecraft.world.item.EnchantedBookItem;
-import net.minecraft.world.item.Items;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.item.enchantment.Enchantment;
 import net.minecraft.world.item.enchantment.EnchantmentInstance;
 import net.minecraft.world.item.trading.MerchantOffer;
@@ -26,63 +27,143 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 
 import java.util.ArrayList;
-import java.util.LinkedHashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.LinkedHashSet;
 
 /** Builds a deterministic catalog from the actual registered villager trade factories. */
 public final class TradeCatalogBuilder {
-    private static final int RANDOM_VARIANT_SAMPLES = 32;
+    private static final int RANDOM_VARIANT_SAMPLES = 8;
 
     private TradeCatalogBuilder() {
     }
 
+    /**
+     * Builds the complete catalog synchronously for callers that explicitly need it.
+     * Server/client lifecycle code should use {@link Session#advance(long)} instead.
+     */
     public static List<TradeRecipe> build(Level level) {
-        List<TradeRecipe> result = new ArrayList<>();
-        Registry<VillagerProfession> professions = level.registryAccess().registryOrThrow(Registries.VILLAGER_PROFESSION);
-        for (Map.Entry<VillagerProfession, Int2ObjectMap<VillagerTrades.ItemListing[]>> professionEntry : VillagerTrades.TRADES.entrySet()) {
-            VillagerProfession profession = professionEntry.getKey();
-            ResourceLocation professionId = professions.getKey(profession);
-            if (professionId == null) continue;
-            List<ResourceLocation> workstations = findWorkstations(level, profession);
-            for (Int2ObjectMap.Entry<VillagerTrades.ItemListing[]> levelEntry : professionEntry.getValue().int2ObjectEntrySet()) {
-                int levelNumber = levelEntry.getIntKey();
-                VillagerTrades.ItemListing[] listings = levelEntry.getValue();
-                for (int index = 0; index < listings.length; index++) {
+        Session session = new Session(level);
+        session.advance(Long.MAX_VALUE / 2);
+        return session.snapshot();
+    }
+
+    public static Session session(Level level) {
+        return new Session(level);
+    }
+
+    /** Incremental catalog builder that performs all Minecraft calls on its owning game thread. */
+    public static final class Session {
+        private final List<ListingTask> tasks = new ArrayList<>();
+        private final Map<String, TradeRecipe> entries = new LinkedHashMap<>();
+        private int cursor;
+        private boolean complete;
+
+        private Session(Level level) {
+            Registry<VillagerProfession> professions = level.registryAccess()
+                    .registryOrThrow(Registries.VILLAGER_PROFESSION);
+            ResourceLocation villagerId = new ResourceLocation("minecraft", "villager");
+            for (Map.Entry<VillagerProfession, Int2ObjectMap<VillagerTrades.ItemListing[]>> professionEntry
+                    : VillagerTrades.TRADES.entrySet()) {
+                VillagerProfession profession = professionEntry.getKey();
+                ResourceLocation professionId = professions.getKey(profession);
+                if (professionId == null) continue;
+                List<ResourceLocation> workstations = findWorkstations(level, profession);
+                for (Int2ObjectMap.Entry<VillagerTrades.ItemListing[]> levelEntry
+                        : professionEntry.getValue().int2ObjectEntrySet()) {
+                    int levelNumber = levelEntry.getIntKey();
+                    VillagerTrades.ItemListing[] listings = levelEntry.getValue();
                     Villager villager = EntityType.VILLAGER.create(level);
                     if (villager == null) continue;
                     villager.setVillagerData(new VillagerData(VillagerType.PLAINS, profession, levelNumber));
-                    TradeRecipe recipe = buildListingVariants(villager, listings[index],
-                            new ResourceLocation("minecraft", "villager"), professionId,
-                            workstations, levelNumber, seedFor(professionId, levelNumber, index));
-                    if (recipe != null) result.add(recipe);
+                    for (int index = 0; index < listings.length; index++) {
+                        tasks.add(new ListingTask(villager, listings[index], villagerId, professionId,
+                                workstations, levelNumber, seedFor(professionId, levelNumber, index)));
+                    }
+                }
+            }
+
+            ResourceLocation wanderingTraderId = new ResourceLocation("minecraft", "wandering_trader");
+            WanderingTrader trader = EntityType.WANDERING_TRADER.create(level);
+            if (trader != null) {
+                for (Int2ObjectMap.Entry<VillagerTrades.ItemListing[]> levelEntry
+                        : VillagerTrades.WANDERING_TRADER_TRADES.int2ObjectEntrySet()) {
+                    int levelNumber = levelEntry.getIntKey();
+                    VillagerTrades.ItemListing[] listings = levelEntry.getValue();
+                    for (int index = 0; index < listings.length; index++) {
+                        tasks.add(new ListingTask(trader, listings[index], wanderingTraderId, null,
+                                List.of(), levelNumber, seedFor(wanderingTraderId, levelNumber, index)));
+                    }
                 }
             }
         }
-        result.addAll(buildWanderingTraderTrades(level));
-        return deduplicate(result);
-    }
 
-    private static List<TradeRecipe> buildWanderingTraderTrades(Level level) {
-        List<TradeRecipe> result = new ArrayList<>();
-        ResourceLocation entityId = new ResourceLocation("minecraft", "wandering_trader");
-        for (Int2ObjectMap.Entry<VillagerTrades.ItemListing[]> levelEntry
-                : VillagerTrades.WANDERING_TRADER_TRADES.int2ObjectEntrySet()) {
-            int levelNumber = levelEntry.getIntKey();
-            VillagerTrades.ItemListing[] listings = levelEntry.getValue();
-            for (int index = 0; index < listings.length; index++) {
-                WanderingTrader trader = EntityType.WANDERING_TRADER.create(level);
-                if (trader == null) continue;
-                TradeRecipe recipe = buildListingVariants(trader, listings[index], entityId, null,
-                        List.of(), levelNumber, seedFor(entityId, levelNumber, index));
-                if (recipe != null) result.add(recipe);
+        public boolean advance(long budgetNanos) {
+            if (complete) return true;
+            if (cursor >= tasks.size()) {
+                complete = true;
+                return true;
             }
+
+            long deadline = budgetNanos >= Long.MAX_VALUE / 2
+                    ? Long.MAX_VALUE
+                    : System.nanoTime() + Math.max(1L, budgetNanos);
+            int start = cursor;
+            do {
+                ListingTask task = tasks.get(cursor++);
+                TradeRecipe recipe = buildListingVariants(task.merchant, task.listing,
+                        task.entityType, task.profession, task.workstations, task.level, task.seed);
+                if (recipe != null) {
+                    entries.merge(recipe.fingerprint(), recipe, TradeRecipe::merge);
+                }
+            } while (cursor < tasks.size() && (cursor == start + 1 || System.nanoTime() < deadline));
+
+            complete = cursor >= tasks.size();
+            return complete;
         }
-        return result;
+
+        public boolean isComplete() {
+            return complete;
+        }
+
+        public int processedTasks() {
+            return cursor;
+        }
+
+        public int totalTasks() {
+            return tasks.size();
+        }
+
+        public List<TradeRecipe> snapshot() {
+            return List.copyOf(entries.values());
+        }
     }
 
-    private static TradeRecipe buildListingVariants(net.minecraft.world.entity.Entity merchant,
+    private static final class ListingTask {
+        private final Entity merchant;
+        private final VillagerTrades.ItemListing listing;
+        private final ResourceLocation entityType;
+        private final ResourceLocation profession;
+        private final List<ResourceLocation> workstations;
+        private final int level;
+        private final long seed;
+
+        private ListingTask(Entity merchant, VillagerTrades.ItemListing listing,
+                            ResourceLocation entityType, ResourceLocation profession,
+                            List<ResourceLocation> workstations, int level, long seed) {
+            this.merchant = merchant;
+            this.listing = listing;
+            this.entityType = entityType;
+            this.profession = profession;
+            this.workstations = workstations;
+            this.level = level;
+            this.seed = seed;
+        }
+    }
+
+    private static TradeRecipe buildListingVariants(Entity merchant,
                                                     VillagerTrades.ItemListing listing,
                                                     ResourceLocation entityType,
                                                     ResourceLocation profession,
@@ -95,14 +176,18 @@ public final class TradeCatalogBuilder {
                 if (offer == null) continue;
                 TradeRecipe recipe = TradeRecipe.fromOffer(entityType, profession, workstations, level, offer);
                 if (offer.getResult().is(Items.ENCHANTED_BOOK)) {
-                    variants.addAll(expandEnchantedBookVariants(recipe));
-                } else {
-                    variants.add(recipe);
+                    // The enchantment itself is expanded exhaustively; further random samples are redundant.
+                    return mergeVariants(expandEnchantedBookVariants(recipe));
                 }
+                variants.add(recipe);
             } catch (RuntimeException ex) {
                 Jei_trade.LOGGER.debug("Could not create example trade {} level {}", profession, level, ex);
             }
         }
+        return mergeVariants(variants);
+    }
+
+    private static TradeRecipe mergeVariants(List<TradeRecipe> variants) {
         if (variants.isEmpty()) return null;
         TradeRecipe merged = variants.get(0);
         for (int i = 1; i < variants.size(); i++) merged = TradeRecipe.merge(merged, variants.get(i));
@@ -145,7 +230,7 @@ public final class TradeCatalogBuilder {
             if (!profession.heldJobSite().test(holder)) continue;
             for (BlockState state : entry.getValue().matchingStates()) {
                 Block block = state.getBlock();
-                if (!block.asItem().equals(net.minecraft.world.item.Items.AIR)) {
+                if (!block.asItem().equals(Items.AIR)) {
                     ResourceLocation blockId = net.minecraftforge.registries.ForgeRegistries.BLOCKS.getKey(block);
                     if (blockId != null) ids.add(blockId);
                 }
@@ -155,12 +240,9 @@ public final class TradeCatalogBuilder {
     }
 
     public static List<TradeRecipe> deduplicate(List<TradeRecipe> recipes) {
-        LinkedHashSet<String> seen = new LinkedHashSet<>();
-        List<TradeRecipe> result = new ArrayList<>();
-        for (TradeRecipe recipe : recipes) {
-            if (seen.add(recipe.fingerprint())) result.add(recipe);
-        }
-        return result;
+        Map<String, TradeRecipe> unique = new LinkedHashMap<>();
+        for (TradeRecipe recipe : recipes) unique.merge(recipe.fingerprint(), recipe, TradeRecipe::merge);
+        return new ArrayList<>(unique.values());
     }
 
     private static long seedFor(ResourceLocation profession, int level, int index) {

@@ -9,6 +9,7 @@ import net.minecraft.world.item.trading.Merchant;
 import net.minecraftforge.event.entity.player.PlayerInteractEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.event.server.ServerStartedEvent;
+import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
 
@@ -18,6 +19,8 @@ import java.util.WeakHashMap;
 @Mod.EventBusSubscriber(modid = Jei_trade.MODID, bus = Mod.EventBusSubscriber.Bus.FORGE)
 public final class ServerTradeEvents {
     private static final Map<MinecraftServer, TradeServerCatalog> CATALOGS = new WeakHashMap<>();
+    private static final Map<MinecraftServer, TradeCatalogBuilder.Session> BUILDERS = new WeakHashMap<>();
+    private static final long BUILD_BUDGET_NANOS = 4_000_000L;
 
     private ServerTradeEvents() {
     }
@@ -25,19 +28,32 @@ public final class ServerTradeEvents {
     @SubscribeEvent
     public static void onServerStarted(ServerStartedEvent event) {
         MinecraftServer server = event.getServer();
+        if (!Config.ENABLE_SERVER_CATALOG.get()) return;
         ServerLevel level = server.getAllLevels().iterator().next();
+        BUILDERS.put(server, TradeCatalogBuilder.session(level));
+        Jei_trade.LOGGER.info("Started incremental villager trade catalog discovery");
+    }
+
+    @SubscribeEvent
+    public static void onServerTick(TickEvent.ServerTickEvent event) {
+        if (event.phase != TickEvent.Phase.END) return;
+        MinecraftServer server = event.getServer();
+        TradeCatalogBuilder.Session builder = BUILDERS.get(server);
+        if (builder == null || !builder.advance(BUILD_BUDGET_NANOS)) return;
+
         TradeServerCatalog catalog = catalog(server);
-        catalog.replace(TradeCatalogBuilder.build(level));
+        catalog.addAll(builder.snapshot());
+        BUILDERS.remove(server);
         Jei_trade.LOGGER.info("Built {} synchronized villager trade entries", catalog.snapshot().size());
+        for (ServerPlayer online : server.getPlayerList().getPlayers()) {
+            TradeNetworking.send(online, catalog.snapshot());
+        }
     }
 
     @SubscribeEvent
     public static void onPlayerLoggedIn(PlayerEvent.PlayerLoggedInEvent event) {
         if (!(event.getEntity() instanceof ServerPlayer player) || !Config.ENABLE_SERVER_CATALOG.get()) return;
         TradeServerCatalog catalog = catalog(player.server);
-        if (catalog.snapshot().isEmpty() && player.server.getAllLevels().iterator().hasNext()) {
-            catalog.replace(TradeCatalogBuilder.build(player.server.getAllLevels().iterator().next()));
-        }
         TradeNetworking.send(player, catalog.snapshot());
     }
 
