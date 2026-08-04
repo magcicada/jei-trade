@@ -151,9 +151,12 @@ public final class TradeCatalogBuilder {
             try {
                 entity = type.create(level);
                 if (!(entity instanceof Merchant merchant)) return;
-                scheduleMerchantVariantSamples(type);
+                boolean firstMerchantSample = scheduleMerchantVariantSamples(type);
                 MerchantOffers offers = merchant.getOffers();
-                if (offers == null || offers.isEmpty()) return;
+                List<MerchantOffer> declaredOffers = firstMerchantSample
+                        ? findDeclaredMerchantOffers(entity, type)
+                        : List.of();
+                if ((offers == null || offers.isEmpty()) && declaredOffers.isEmpty()) return;
 
                 ResourceLocation professionId = null;
                 List<ResourceLocation> workstations = List.of();
@@ -167,10 +170,13 @@ public final class TradeCatalogBuilder {
                     merchantLevel = holder.getVillagerData().getLevel();
                 }
 
-                for (MerchantOffer offer : offers) {
-                    TradeRecipe recipe = TradeRecipe.fromOffer(entityId, professionId,
-                            workstations, merchantLevel, offer);
-                    entries.merge(recipe.fingerprint(), recipe, TradeRecipe::merge);
+                if (offers != null) {
+                    for (MerchantOffer offer : offers) {
+                        mergeOffer(entityId, professionId, workstations, merchantLevel, offer);
+                    }
+                }
+                for (MerchantOffer offer : declaredOffers) {
+                    mergeOffer(entityId, professionId, workstations, merchantLevel, offer);
                 }
             } catch (RuntimeException | LinkageError ex) {
                 Jei_trade.LOGGER.debug("Could not inspect merchant entity type {}", entityId, ex);
@@ -179,11 +185,20 @@ public final class TradeCatalogBuilder {
             }
         }
 
-        private void scheduleMerchantVariantSamples(EntityType<?> type) {
-            if (!sampledMerchantTypes.add(type)) return;
+        private boolean scheduleMerchantVariantSamples(EntityType<?> type) {
+            if (!sampledMerchantTypes.add(type)) return false;
             for (int sample = 1; sample < MERCHANT_ENTITY_SAMPLES; sample++) {
                 entityTypes.add(type);
             }
+            return true;
+        }
+
+        private void mergeOffer(ResourceLocation entityId, ResourceLocation professionId,
+                                List<ResourceLocation> workstations, int merchantLevel,
+                                MerchantOffer offer) {
+            TradeRecipe recipe = TradeRecipe.fromOffer(entityId, professionId,
+                    workstations, merchantLevel, offer);
+            entries.merge(recipe.fingerprint(), recipe, TradeRecipe::merge);
         }
 
         public boolean isComplete() {
@@ -201,6 +216,61 @@ public final class TradeCatalogBuilder {
         public List<TradeRecipe> snapshot() {
             return List.copyOf(entries.values());
         }
+    }
+
+    /** Reads Goblin Traders' public, data-driven trade table without making it a required dependency. */
+    private static List<MerchantOffer> findDeclaredMerchantOffers(Entity entity, EntityType<?> type) {
+        ResourceLocation entityId = BuiltInRegistries.ENTITY_TYPE.getKey(type);
+        if (entityId == null || !"goblintraders".equals(entityId.getNamespace())) return List.of();
+
+        try {
+            Class<?> managerClass = Class.forName("com.mrcrayfish.goblintraders.trades.TradeManager");
+            Object manager = managerClass.getMethod("instance").invoke(null);
+            Object entityTrades = managerClass.getMethod("getTrades", EntityType.class).invoke(manager, type);
+            if (entityTrades == null) return List.of();
+
+            java.lang.reflect.Method mapAccessor;
+            try {
+                mapAccessor = entityTrades.getClass().getMethod("getTradeMap");
+            } catch (NoSuchMethodException ignored) {
+                mapAccessor = entityTrades.getClass().getMethod("map");
+            }
+            Object rawMap = mapAccessor.invoke(entityTrades);
+            if (!(rawMap instanceof Map<?, ?> tradeMap)) return List.of();
+
+            List<MerchantOffer> result = new ArrayList<>();
+            int index = 0;
+            for (Object rawDefinitions : tradeMap.values()) {
+                if (!(rawDefinitions instanceof Iterable<?> definitions)) continue;
+                for (Object definition : definitions) {
+                    RandomSource random = RandomSource.create(seedFor(entityId, 0, index++));
+                    try {
+                        MerchantOffer offer = declaredOffer(definition, entity, random);
+                        if (offer != null) result.add(offer);
+                    } catch (ReflectiveOperationException | RuntimeException | LinkageError ex) {
+                        Jei_trade.LOGGER.debug("Could not inspect declared trade for {}", entityId, ex);
+                    }
+                }
+            }
+            return List.copyOf(result);
+        } catch (ReflectiveOperationException | RuntimeException | LinkageError ex) {
+            Jei_trade.LOGGER.debug("Could not read declared trades for {}", entityId, ex);
+            return List.of();
+        }
+    }
+
+    private static MerchantOffer declaredOffer(Object definition, Entity entity, RandomSource random)
+            throws ReflectiveOperationException {
+        if (definition instanceof VillagerTrades.ItemListing listing) {
+            return listing.getOffer(entity, random);
+        }
+        for (java.lang.reflect.Method method : definition.getClass().getMethods()) {
+            if (method.getName().equals("createVanillaOffer") && method.getParameterCount() == 2) {
+                Object offer = method.invoke(definition, entity, random);
+                return offer instanceof MerchantOffer merchantOffer ? merchantOffer : null;
+            }
+        }
+        return null;
     }
 
     private static final class ListingTask {
