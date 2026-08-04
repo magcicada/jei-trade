@@ -39,10 +39,16 @@ public final class TradeJeiPlugin implements IModPlugin {
 
     @Override
     public void registerRecipes(IRecipeRegistration registration) {
-        ClientTradeCatalog.ensureFallback(Minecraft.getInstance().level);
+        Minecraft minecraft = Minecraft.getInstance();
+        if (minecraft.getConnection() == null) {
+            ClientTradeCatalog.ensureFallback(minecraft.level);
+        }
         List<TradeRecipeGroup> groups = ClientTradeCatalog.snapshotGroups();
-        registration.addRecipes(TRADE_RECIPE_TYPE, groups);
-        groups.forEach(group -> REGISTERED_RECIPE_GROUPS.put(group.fingerprint(), group));
+        List<TradeRecipeGroup> pending = groups.stream()
+                .filter(group -> !REGISTERED_RECIPE_GROUPS.containsKey(group.fingerprint()))
+                .toList();
+        if (!pending.isEmpty()) registration.addRecipes(TRADE_RECIPE_TYPE, pending);
+        pending.forEach(group -> REGISTERED_RECIPE_GROUPS.put(group.fingerprint(), group));
     }
 
     @Override
