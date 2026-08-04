@@ -8,6 +8,7 @@ import net.minecraftforge.client.event.ClientPlayerNetworkEvent;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
+import net.xuwu.jei_trade.client.TradeJeiPlugin;
 
 @Mod.EventBusSubscriber(modid = Jei_trade.MODID, bus = Mod.EventBusSubscriber.Bus.FORGE, value = Dist.CLIENT)
 public final class ClientTradeEvents {
@@ -23,6 +24,7 @@ public final class ClientTradeEvents {
             MerchantMenu menu = screen.getMenu();
             ClientTradeCatalog.observeOffers(menu.getOffers(), menu.getTraderLevel());
         }
+        TradeJeiPlugin.refreshRecipes();
     }
 
     @SubscribeEvent

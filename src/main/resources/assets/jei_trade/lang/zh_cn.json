@@ -1,8 +1,10 @@
 {
   "jei_trade.category.villager_trade": "村民交易",
   "jei_trade.source.merchant": "自定义商人",
+  "jei_trade.source.wandering_trader": "流浪商人",
   "jei_trade.source.profession": "职业：%s",
   "jei_trade.page": "第 %s/%s 页",
   "jei_trade.level": "等级 %s",
-  "jei_trade.uses": "使用次数：%s/%s"
+  "jei_trade.uses": "使用次数：%s/%s",
+  "jei_trade.max_uses": "上限：%s"
 }

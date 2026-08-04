@@ -111,7 +111,7 @@ public final class TradeRecipeGroup {
     }
 
     public boolean outputMatches(ItemStack stack) {
-        return trades.stream().anyMatch(recipe -> recipe.result().is(stack.getItem()));
+        return trades.stream().anyMatch(recipe -> recipe.outputMatches(stack));
     }
 
     public String fingerprint() {

@@ -7,6 +7,7 @@ import mezz.jei.api.recipe.IFocusGroup;
 import mezz.jei.api.recipe.RecipeType;
 import mezz.jei.api.recipe.category.AbstractRecipeCategory;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
@@ -40,11 +41,11 @@ final class TradeRecipeCategory extends AbstractRecipeCategory<TradeRecipeGroup>
         for (int index = 0; index < group.trades().size(); index++) {
             TradeRecipe trade = group.trades().get(index);
             int y = HEADER_HEIGHT + index * ROW_HEIGHT;
-            builder.addInputSlot(4, y).setStandardSlotBackground().addItemStack(trade.buyA());
+            builder.addInputSlot(4, y).setStandardSlotBackground().addItemStacks(trade.buyAVariantsForDisplay());
             if (!trade.buyB().isEmpty()) {
-                builder.addInputSlot(27, y).setStandardSlotBackground().addItemStack(trade.buyB());
+                builder.addInputSlot(27, y).setStandardSlotBackground().addItemStacks(trade.buyBVariantsForDisplay());
             }
-            builder.addOutputSlot(91, y).setOutputSlotBackground().addItemStack(trade.result());
+            builder.addInputSlot(91, y).setStandardSlotBackground().addItemStacks(trade.resultVariantsForDisplay());
         }
     }
 
@@ -54,7 +55,12 @@ final class TradeRecipeCategory extends AbstractRecipeCategory<TradeRecipeGroup>
         Minecraft minecraft = Minecraft.getInstance();
         int workstationCount = Math.min(group.workstationStacks().size(), 3);
         int titleX = workstationCount == 0 ? 4 : 4 + workstationCount * 20 + 3;
-        String source = group.profession() == null
+        boolean wanderingTrader = group.entityType() != null
+                && "minecraft".equals(group.entityType().getNamespace())
+                && "wandering_trader".equals(group.entityType().getPath());
+        String source = wanderingTrader
+                ? Component.translatable("jei_trade.source.wandering_trader").getString()
+                : group.profession() == null
                 ? Component.translatable("jei_trade.source.merchant").getString()
                 : Component.translatable("jei_trade.source.profession", group.profession().toString()).getString();
         source = minecraft.font.plainSubstrByWidth(source, CATEGORY_WIDTH - titleX - 4);
@@ -70,9 +76,19 @@ final class TradeRecipeCategory extends AbstractRecipeCategory<TradeRecipeGroup>
             int y = HEADER_HEIGHT + index * ROW_HEIGHT;
             graphics.drawString(minecraft.font, "->", 55, y + 5, 0x404040, false);
             String level = Component.translatable("jei_trade.level", trade.level()).getString();
-            graphics.drawString(minecraft.font, level, 115, y + 2, 0x404040, false);
-            graphics.drawString(minecraft.font, trade.uses() + "/" + trade.maxUses(), 115, y + 12,
+            graphics.drawString(minecraft.font, level, 120, y + 2, 0x404040, false);
+            graphics.drawString(minecraft.font,
+                    Component.translatable("jei_trade.max_uses", trade.maxUses()), 120, y + 12,
                     0x606060, false);
+            drawRange(graphics, minecraft.font, trade.buyACountRange(), 4, y);
+            drawRange(graphics, minecraft.font, trade.buyBCountRange(), 27, y);
+            drawRange(graphics, minecraft.font, trade.resultCountRange(), 91, y);
+        }
+    }
+
+    private static void drawRange(GuiGraphics graphics, Font font, String range, int x, int y) {
+        if (!range.isEmpty()) {
+            graphics.drawString(font, range, x + 17 - font.width(range), y + 9, 0xFFFFFFFF, true);
         }
     }
 

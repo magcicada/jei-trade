@@ -22,7 +22,7 @@ public final class ClientTradeCatalog {
 
     public static synchronized void replace(List<TradeRecipe> recipes) {
         ENTRIES.clear();
-        for (TradeRecipe recipe : recipes) ENTRIES.put(recipe.fingerprint(), recipe);
+        for (TradeRecipe recipe : recipes) add(recipe);
         fallbackBuilt = true;
         serverAuthoritative = true;
     }
@@ -64,7 +64,7 @@ public final class ClientTradeCatalog {
     }
 
     public static synchronized void add(TradeRecipe recipe) {
-        ENTRIES.putIfAbsent(recipe.fingerprint(), recipe);
+        ENTRIES.merge(recipe.fingerprint(), recipe, TradeRecipe::merge);
     }
 
     public static synchronized List<TradeRecipe> snapshot() {

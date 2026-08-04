@@ -17,7 +17,10 @@ final class TradeServerCatalog {
         boolean changed = false;
         for (TradeRecipe recipe : recipes) {
             if (entries.size() >= Config.MAX_CATALOG_ENTRIES.get()) break;
-            changed |= entries.putIfAbsent(recipe.fingerprint(), recipe) == null;
+            TradeRecipe previous = entries.get(recipe.fingerprint());
+            TradeRecipe merged = previous == null ? recipe : TradeRecipe.merge(previous, recipe);
+            changed |= previous == null || !previous.variantsFingerprint().equals(merged.variantsFingerprint());
+            entries.put(recipe.fingerprint(), merged);
         }
         return changed;
     }
