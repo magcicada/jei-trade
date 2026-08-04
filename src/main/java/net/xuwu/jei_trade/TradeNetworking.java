@@ -9,7 +9,7 @@ import net.minecraftforge.network.simple.SimpleChannel;
 import java.util.List;
 
 public final class TradeNetworking {
-    private static final String PROTOCOL = "1";
+    private static final String PROTOCOL = "2";
     private static int packetId;
     public static final SimpleChannel CHANNEL = NetworkRegistry.newSimpleChannel(
             new ResourceLocation(Jei_trade.MODID, "main"),

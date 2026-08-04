@@ -51,7 +51,6 @@ public final class ServerTradeEvents {
             TradeServerCatalog catalog = catalog(player.server);
             int level = merchant instanceof VillagerDataHolder holder
                     ? holder.getVillagerData().getLevel() : 0;
-            java.util.List<TradeRecipe> before = catalog.snapshot();
             java.util.List<TradeRecipe> observed = new java.util.ArrayList<>();
             for (var offer : merchant.getOffers()) {
                 net.minecraft.resources.ResourceLocation entityId = net.minecraftforge.registries.ForgeRegistries.ENTITY_TYPES.getKey(target.getType());
@@ -65,10 +64,8 @@ public final class ServerTradeEvents {
                 observed.add(TradeRecipe.fromOffer(entityId, professionId, workstations, level, offer));
             }
             if (!catalog.addAll(observed)) return;
-            if (catalog.snapshot().size() != before.size()) {
-                for (ServerPlayer online : player.server.getPlayerList().getPlayers()) {
-                    TradeNetworking.send(online, catalog.snapshot());
-                }
+            for (ServerPlayer online : player.server.getPlayerList().getPlayers()) {
+                TradeNetworking.send(online, catalog.snapshot());
             }
         });
     }

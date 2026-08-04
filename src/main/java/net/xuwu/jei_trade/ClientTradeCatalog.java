@@ -53,7 +53,7 @@ public final class ClientTradeCatalog {
     }
 
     public static synchronized void observeOffers(MerchantOffers offers, int level) {
-        if (offers == null) return;
+        if (serverAuthoritative || offers == null) return;
         for (MerchantOffer offer : offers) {
             add(TradeRecipe.fromOffer(null, null, List.of(), level, offer));
         }
