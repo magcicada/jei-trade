@@ -39,8 +39,8 @@ import java.util.LinkedHashSet;
 
 /** Builds a deterministic catalog from the actual registered villager trade factories. */
 public final class TradeCatalogBuilder {
-    private static final int RANDOM_VARIANT_SAMPLES = 8;
-    private static final int MERCHANT_ENTITY_SAMPLES = 8;
+    private static final int RANDOM_VARIANT_SAMPLES = 100;
+    private static final int MERCHANT_ENTITY_SAMPLES = RANDOM_VARIANT_SAMPLES;
 
     private TradeCatalogBuilder() {
     }
@@ -151,11 +151,14 @@ public final class TradeCatalogBuilder {
             try {
                 entity = type.create(level);
                 if (!(entity instanceof Merchant merchant)) return;
-                boolean firstMerchantSample = scheduleMerchantVariantSamples(type);
+                boolean firstMerchantSample = sampledMerchantTypes.add(type);
                 MerchantOffers offers = merchant.getOffers();
                 List<MerchantOffer> declaredOffers = firstMerchantSample
                         ? findDeclaredMerchantOffers(entity, type)
                         : List.of();
+                if (firstMerchantSample && declaredOffers.isEmpty()) {
+                    scheduleMerchantVariantSamples(type);
+                }
                 if ((offers == null || offers.isEmpty()) && declaredOffers.isEmpty()) return;
 
                 ResourceLocation professionId = null;
@@ -185,12 +188,10 @@ public final class TradeCatalogBuilder {
             }
         }
 
-        private boolean scheduleMerchantVariantSamples(EntityType<?> type) {
-            if (!sampledMerchantTypes.add(type)) return false;
+        private void scheduleMerchantVariantSamples(EntityType<?> type) {
             for (int sample = 1; sample < MERCHANT_ENTITY_SAMPLES; sample++) {
                 entityTypes.add(type);
             }
-            return true;
         }
 
         private void mergeOffer(ResourceLocation entityId, ResourceLocation professionId,
