@@ -308,9 +308,9 @@ public final class TradeRecipe {
     public String fingerprint() {
         return Objects.toString(entityType, "") + '|' + Objects.toString(profession, "") + '|'
                 + workstations + '|' + level + '|'
-                + stackFingerprintIgnoringCount(buyA()) + '|'
-                + stackFingerprintIgnoringCount(buyB()) + '|'
-                + itemFingerprint(result()) + '|' + details;
+                + itemFingerprint(buyA()) + '|'
+                + itemFingerprint(buyB()) + '|'
+                + itemFingerprint(result());
     }
 
     public String variantsFingerprint() {
