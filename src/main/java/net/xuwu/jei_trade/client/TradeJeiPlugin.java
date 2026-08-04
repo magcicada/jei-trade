@@ -7,12 +7,12 @@ import mezz.jei.api.registration.IRecipeCategoryRegistration;
 import mezz.jei.api.recipe.RecipeType;
 import net.minecraft.resources.ResourceLocation;
 import net.xuwu.jei_trade.Jei_trade;
-import net.xuwu.jei_trade.TradeRecipe;
+import net.xuwu.jei_trade.TradeRecipeGroup;
 
 @JeiPlugin
 public final class TradeJeiPlugin implements IModPlugin {
-    public static final RecipeType<TradeRecipe> TRADE_RECIPE_TYPE = RecipeType.create(
-            Jei_trade.MODID, "villager_trade", TradeRecipe.class);
+    public static final RecipeType<TradeRecipeGroup> TRADE_RECIPE_TYPE = RecipeType.create(
+            Jei_trade.MODID, "villager_trade", TradeRecipeGroup.class);
 
     @Override
     public ResourceLocation getPluginUid() {

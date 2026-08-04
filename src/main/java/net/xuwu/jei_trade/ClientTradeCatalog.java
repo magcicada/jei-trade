@@ -71,6 +71,10 @@ public final class ClientTradeCatalog {
         return new ArrayList<>(ENTRIES.values());
     }
 
+    public static synchronized List<TradeRecipeGroup> snapshotGroups() {
+        return TradeRecipeGroup.buildPages(snapshot());
+    }
+
     public static synchronized void clear() {
         ENTRIES.clear();
         fallbackBuilt = false;

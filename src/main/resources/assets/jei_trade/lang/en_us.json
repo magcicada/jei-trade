@@ -2,6 +2,7 @@
   "jei_trade.category.villager_trade": "Villager Trade",
   "jei_trade.source.merchant": "Custom Merchant",
   "jei_trade.source.profession": "Profession: %s",
+  "jei_trade.page": "Page %s/%s",
   "jei_trade.level": "Level %s",
   "jei_trade.uses": "Uses: %s/%s"
 }
