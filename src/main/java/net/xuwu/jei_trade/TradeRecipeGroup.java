@@ -9,7 +9,6 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 
 /** A JEI-facing profession/merchant view made from the synchronized offer list. */
 public final class TradeRecipeGroup {
@@ -45,7 +44,11 @@ public final class TradeRecipeGroup {
 
         List<TradeRecipeGroup> result = new ArrayList<>();
         for (Map.Entry<String, List<TradeRecipe>> entry : grouped.entrySet()) {
-            List<TradeRecipe> sorted = entry.getValue().stream()
+            Map<String, TradeRecipe> unique = new LinkedHashMap<>();
+            for (TradeRecipe recipe : entry.getValue()) {
+                unique.merge(recipe.displayFingerprint(), recipe, TradeRecipe::mergeForDisplay);
+            }
+            List<TradeRecipe> sorted = unique.values().stream()
                     .sorted(Comparator.comparingInt(TradeRecipe::level)
                             .thenComparing(TradeRecipe::fingerprint))
                     .toList();
@@ -62,9 +65,18 @@ public final class TradeRecipeGroup {
     }
 
     private static String groupKey(TradeRecipe recipe) {
-        return Objects.toString(recipe.entityType(), "") + '|'
-                + Objects.toString(recipe.profession(), "") + '|'
-                + recipe.workstations();
+        String workstations = recipe.workstations().stream()
+                .distinct()
+                .sorted()
+                .toList()
+                .toString();
+        if (recipe.profession() != null) {
+            return "profession|" + recipe.profession() + '|' + workstations;
+        }
+        if (recipe.entityType() != null) {
+            return "entity|" + recipe.entityType() + '|' + workstations;
+        }
+        return "merchant|" + workstations;
     }
 
     public ResourceLocation entityType() {
