@@ -116,7 +116,7 @@ public final class TradeRecipeGroup {
 
     public String fingerprint() {
         return groupKey + "|page=" + page + '|' + trades.stream()
-                .map(TradeRecipe::fingerprint)
+                .map(TradeRecipe::variantsFingerprint)
                 .reduce((left, right) -> left + ";" + right)
                 .orElse("");
     }

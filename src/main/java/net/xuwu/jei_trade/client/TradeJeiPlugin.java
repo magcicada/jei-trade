@@ -14,15 +14,16 @@ import net.xuwu.jei_trade.ClientTradeCatalog;
 import net.xuwu.jei_trade.Jei_trade;
 import net.xuwu.jei_trade.TradeRecipeGroup;
 
-import java.util.HashSet;
+import java.util.HashMap;
 import java.util.List;
-import java.util.Set;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 @JeiPlugin
 public final class TradeJeiPlugin implements IModPlugin {
     public static final RecipeType<TradeRecipeGroup> TRADE_RECIPE_TYPE = RecipeType.create(
             Jei_trade.MODID, "villager_trade", TradeRecipeGroup.class);
-    private static final Set<String> REGISTERED_RECIPE_KEYS = new HashSet<>();
+    private static final Map<String, TradeRecipeGroup> REGISTERED_RECIPE_GROUPS = new HashMap<>();
     private static IRecipeManager recipeManager;
 
     @Override
@@ -41,7 +42,7 @@ public final class TradeJeiPlugin implements IModPlugin {
         ClientTradeCatalog.ensureFallback(Minecraft.getInstance().level);
         List<TradeRecipeGroup> groups = ClientTradeCatalog.snapshotGroups();
         registration.addRecipes(TRADE_RECIPE_TYPE, groups);
-        groups.forEach(group -> REGISTERED_RECIPE_KEYS.add(group.fingerprint()));
+        groups.forEach(group -> REGISTERED_RECIPE_GROUPS.put(group.fingerprint(), group));
     }
 
     @Override
@@ -58,14 +59,29 @@ public final class TradeJeiPlugin implements IModPlugin {
     @Override
     public void onRuntimeUnavailable() {
         recipeManager = null;
-        REGISTERED_RECIPE_KEYS.clear();
+        REGISTERED_RECIPE_GROUPS.clear();
     }
 
     public static void refreshRecipes() {
         if (recipeManager == null) return;
-        List<TradeRecipeGroup> pending = ClientTradeCatalog.snapshotGroups().stream()
-                .filter(group -> REGISTERED_RECIPE_KEYS.add(group.fingerprint()))
+        List<TradeRecipeGroup> current = ClientTradeCatalog.snapshotGroups();
+        Map<String, TradeRecipeGroup> currentByKey = current.stream()
+                .collect(Collectors.toMap(TradeRecipeGroup::fingerprint,
+                        group -> group, (left, right) -> right));
+
+        List<TradeRecipeGroup> stale = REGISTERED_RECIPE_GROUPS.entrySet().stream()
+                .filter(entry -> !currentByKey.containsKey(entry.getKey()))
+                .map(Map.Entry::getValue)
+                .toList();
+        if (!stale.isEmpty()) {
+            recipeManager.hideRecipes(TRADE_RECIPE_TYPE, stale);
+            stale.forEach(group -> REGISTERED_RECIPE_GROUPS.remove(group.fingerprint()));
+        }
+
+        List<TradeRecipeGroup> pending = current.stream()
+                .filter(group -> !REGISTERED_RECIPE_GROUPS.containsKey(group.fingerprint()))
                 .toList();
         if (!pending.isEmpty()) recipeManager.addRecipes(TRADE_RECIPE_TYPE, pending);
+        pending.forEach(group -> REGISTERED_RECIPE_GROUPS.put(group.fingerprint(), group));
     }
 }
