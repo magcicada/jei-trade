@@ -11,14 +11,18 @@ import mezz.jei.api.recipe.category.AbstractRecipeCategory;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.client.resources.language.I18n;
+import net.minecraft.client.resources.language.ClientLanguage;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.ChatFormatting;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.item.ItemStack;
 import net.xuwu.jei_trade.Jei_trade;
 import net.xuwu.jei_trade.TradeRecipe;
 import net.xuwu.jei_trade.TradeRecipeGroup;
+
+import java.util.List;
 
 final class TradeRecipeCategory extends AbstractRecipeCategory<TradeRecipeGroup> {
     private static final int ROW_HEIGHT = 22;
@@ -95,7 +99,7 @@ final class TradeRecipeCategory extends AbstractRecipeCategory<TradeRecipeGroup>
         String source = wanderingTrader
                 ? Component.translatable("jei_trade.source.wandering_trader").getString()
                 : group.profession() == null
-                ? Component.translatable("jei_trade.source.merchant").getString()
+                ? merchantName(group.entityType()).getString()
                 : Component.translatable("jei_trade.source.profession", professionName(group.profession())).getString();
         source = minecraft.font.plainSubstrByWidth(source, CATEGORY_WIDTH - titleX - 4);
         graphics.drawString(minecraft.font, source, titleX, 7, 0x404040, false);
@@ -133,13 +137,35 @@ final class TradeRecipeCategory extends AbstractRecipeCategory<TradeRecipeGroup>
     }
 
     private static Component professionName(ResourceLocation profession) {
-        String namespaceKey = "entity." + profession.getNamespace() + ".villager." + profession.getPath();
-        if (I18n.exists(namespaceKey)) return Component.translatable(namespaceKey);
-
-        String vanillaKey = "entity.minecraft.villager." + profession.getPath();
-        if (I18n.exists(vanillaKey)) return Component.translatable(vanillaKey);
+        for (String key : professionTranslationKeys(profession)) {
+            if (ClientLanguage.getInstance().has(key)) return Component.translatable(key);
+        }
 
         return Component.literal(profession.toString());
+    }
+
+    private static List<String> professionTranslationKeys(ResourceLocation profession) {
+        String namespace = profession.getNamespace();
+        String path = profession.getPath();
+        return List.of(
+                "entity." + namespace + ".villager." + path,
+                "entity." + namespace + "." + path,
+                "villager.profession." + namespace + "." + path,
+                "villager.profession." + path,
+                "profession." + namespace + "." + path,
+                "profession." + path,
+                "entity.minecraft.villager." + path
+        );
+    }
+
+    private static Component merchantName(ResourceLocation entityType) {
+        if (entityType != null) {
+            EntityType<?> type = BuiltInRegistries.ENTITY_TYPE.get(entityType);
+            if (type != null && ClientLanguage.getInstance().has(type.getDescriptionId())) {
+                return Component.translatable(type.getDescriptionId());
+            }
+        }
+        return Component.translatable("jei_trade.source.merchant");
     }
 
     @Override
