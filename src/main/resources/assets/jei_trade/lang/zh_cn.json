@@ -15,6 +15,11 @@
   "jei_trade.detail.random_book_enchant": "输出为随机可交易附魔书",
   "jei_trade.detail.random_enchant": "输出会随机附魔（等级 %s-%s）",
   "jei_trade.detail.stew_effect": "效果：%s，持续 %s tick",
-  "jei_trade.detail.treasure_map": "地图类型：%s"
-  ,"jei_trade.detail.villager_type_output": "输出取决于村民外观类型"
+  "jei_trade.detail.treasure_map": "地图类型：%s",
+  "jei_trade.detail.villager_type_output": "输出取决于村民外观类型",
+  "jei_trade.detail.treasure_enchant": "是否为宝藏附魔：%s",
+  "jei_trade.yes": "是",
+  "jei_trade.no": "否",
+  "jei_trade.possible": "可能",
+  "jei_trade.unknown": "未知"
 }

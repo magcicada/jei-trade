@@ -326,7 +326,7 @@ public final class TradeRecipe {
     private static List<ItemStack> displayVariants(List<ItemStack> variants, int min, int max) {
         return variants.stream().map(stack -> {
             ItemStack copy = copy(stack);
-            if (min != max) copy.setCount(1);
+            copy.setCount(min != max ? 1 : min);
             return copy;
         }).toList();
     }

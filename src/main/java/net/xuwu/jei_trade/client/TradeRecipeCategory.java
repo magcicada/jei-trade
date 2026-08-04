@@ -12,8 +12,6 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.resources.language.I18n;
-import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.ListTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.ChatFormatting;
 import net.minecraft.resources.ResourceLocation;
@@ -76,42 +74,13 @@ final class TradeRecipeCategory extends AbstractRecipeCategory<TradeRecipeGroup>
                 boolean sameItem = variants.stream().allMatch(stack -> stack.is(variants.get(0).getItem()));
                 tooltip.add(Component.translatable(sameItem ? "jei_trade.nbt_variants" : "jei_trade.variants", nbtVariants)
                         .withStyle(ChatFormatting.GRAY));
-                int shown = 0;
-                java.util.Set<String> names = new java.util.LinkedHashSet<>();
-                for (ItemStack variant : variants) {
-                    names.add(variantName(variant));
-                    if (++shown >= 8) break;
-                }
-                for (String name : names) {
-                    tooltip.add(Component.literal("  • " + name).withStyle(ChatFormatting.DARK_GRAY));
-                }
-                if (nbtVariants > names.size()) {
-                    tooltip.add(Component.translatable("jei_trade.nbt_more", nbtVariants - names.size())
-                            .withStyle(ChatFormatting.DARK_GRAY));
-                }
             }
             if (!countRange.isEmpty()) {
                 tooltip.add(Component.translatable("jei_trade.count_range", countRange)
-                        .withStyle(ChatFormatting.GOLD));
+                        .withStyle(ChatFormatting.GRAY));
             }
             if (includeDetails) trade.details().forEach(tooltip::add);
         });
-    }
-
-    private static String variantName(ItemStack stack) {
-        CompoundTag tag = stack.getTag();
-        if (tag != null && tag.contains("StoredEnchantments", 9)) {
-            ListTag enchantments = tag.getList("StoredEnchantments", 10);
-            if (!enchantments.isEmpty()) {
-                CompoundTag enchantment = enchantments.getCompound(0);
-                String id = enchantment.getString("id");
-                int level = enchantment.getShort("lvl");
-                String key = "enchantment." + id.replace(':', '.');
-                return Component.translatable(key).getString() + " " + level;
-            }
-        }
-        String name = stack.getHoverName().getString();
-        return name;
     }
 
     @Override

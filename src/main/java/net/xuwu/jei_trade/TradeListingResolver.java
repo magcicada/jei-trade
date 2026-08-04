@@ -9,6 +9,7 @@ import net.minecraft.world.item.EnchantedBookItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.enchantment.Enchantment;
+import net.minecraft.world.item.enchantment.EnchantmentHelper;
 import net.minecraft.world.item.enchantment.EnchantmentInstance;
 import net.minecraft.world.item.SuspiciousStewItem;
 
@@ -71,7 +72,8 @@ final class TradeListingResolver {
                     List.of(trade.itemStack.copy()), trade.itemStack.getCount(),
                     trade.maxUses, trade.villagerXp,
                     trade.priceMultiplier,
-                    List.of(Component.translatable("jei_trade.detail.random_enchant", 5, 19)));
+                    List.of(Component.translatable("jei_trade.detail.random_enchant", 5, 19),
+                            treasureDetail(trade.itemStack)));
         }
         if (listing instanceof VillagerTrades.ItemsAndEmeraldsToItems trade) {
             return definition(entityType, profession, workstations, level,
@@ -166,5 +168,29 @@ final class TradeListingResolver {
             }
         }
         return variants.isEmpty() ? List.of(new ItemStack(Items.ENCHANTED_BOOK)) : variants;
+    }
+
+    private static Component treasureDetail(ItemStack item) {
+        boolean hasCandidate = false;
+        boolean hasTreasure = false;
+        boolean hasNonTreasure = false;
+        for (EnchantmentInstance candidate : EnchantmentHelper.getAvailableEnchantmentResults(19, item, false)) {
+            hasCandidate = true;
+            if (candidate.enchantment.isTreasureOnly()) {
+                hasTreasure = true;
+            } else {
+                hasNonTreasure = true;
+            }
+        }
+        return Component.translatable("jei_trade.detail.treasure_enchant",
+                Component.translatable(treasureStatusKey(hasCandidate, hasTreasure, hasNonTreasure)));
+    }
+
+    private static String treasureStatusKey(boolean hasCandidate, boolean hasTreasure,
+                                             boolean hasNonTreasure) {
+        if (!hasCandidate) return "jei_trade.unknown";
+        if (hasTreasure && !hasNonTreasure) return "jei_trade.yes";
+        if (!hasTreasure && hasNonTreasure) return "jei_trade.no";
+        return "jei_trade.possible";
     }
 }
