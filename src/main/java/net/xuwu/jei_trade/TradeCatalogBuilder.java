@@ -40,6 +40,7 @@ import java.util.LinkedHashSet;
 /** Builds a deterministic catalog from the actual registered villager trade factories. */
 public final class TradeCatalogBuilder {
     private static final int RANDOM_VARIANT_SAMPLES = 8;
+    private static final int MERCHANT_ENTITY_SAMPLES = 8;
 
     private TradeCatalogBuilder() {
     }
@@ -63,6 +64,7 @@ public final class TradeCatalogBuilder {
         private final Level level;
         private final List<ListingTask> tasks = new ArrayList<>();
         private final List<EntityType<?>> entityTypes = new ArrayList<>();
+        private final Set<EntityType<?>> sampledMerchantTypes = new LinkedHashSet<>();
         private final Map<String, TradeRecipe> entries = new LinkedHashMap<>();
         private int cursor;
         private int entityCursor;
@@ -149,6 +151,7 @@ public final class TradeCatalogBuilder {
             try {
                 entity = type.create(level);
                 if (!(entity instanceof Merchant merchant)) return;
+                scheduleMerchantVariantSamples(type);
                 MerchantOffers offers = merchant.getOffers();
                 if (offers == null || offers.isEmpty()) return;
 
@@ -173,6 +176,13 @@ public final class TradeCatalogBuilder {
                 Jei_trade.LOGGER.debug("Could not inspect merchant entity type {}", entityId, ex);
             } finally {
                 if (entity != null) entity.discard();
+            }
+        }
+
+        private void scheduleMerchantVariantSamples(EntityType<?> type) {
+            if (!sampledMerchantTypes.add(type)) return;
+            for (int sample = 1; sample < MERCHANT_ENTITY_SAMPLES; sample++) {
+                entityTypes.add(type);
             }
         }
 

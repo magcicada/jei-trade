@@ -231,10 +231,10 @@ public final class TradeRecipe {
 
     private static List<ItemStack> union(List<ItemStack> left, List<ItemStack> right) {
         Map<String, ItemStack> result = new LinkedHashMap<>();
-        for (ItemStack stack : left) result.put(stackFingerprint(stack), copy(stack));
+        for (ItemStack stack : left) result.put(stackFingerprintIgnoringCount(stack), copy(stack));
         for (ItemStack stack : right) {
             if (result.size() >= MAX_VARIANTS) break;
-            result.putIfAbsent(stackFingerprint(stack), copy(stack));
+            result.putIfAbsent(stackFingerprintIgnoringCount(stack), copy(stack));
         }
         return List.copyOf(result.values());
     }
@@ -324,11 +324,13 @@ public final class TradeRecipe {
     }
 
     private static List<ItemStack> displayVariants(List<ItemStack> variants, int min, int max) {
-        return variants.stream().map(stack -> {
+        Map<String, ItemStack> result = new LinkedHashMap<>();
+        for (ItemStack stack : variants) {
             ItemStack copy = copy(stack);
             copy.setCount(min != max ? 1 : min);
-            return copy;
-        }).toList();
+            result.putIfAbsent(stackFingerprint(copy), copy);
+        }
+        return List.copyOf(result.values());
     }
 
     private static int count(ItemStack stack) {
