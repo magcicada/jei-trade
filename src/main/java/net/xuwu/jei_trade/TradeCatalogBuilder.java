@@ -3,6 +3,7 @@ package net.xuwu.jei_trade;
 import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
 import net.minecraft.core.Holder;
 import net.minecraft.core.Registry;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
@@ -11,6 +12,7 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.ai.village.poi.PoiType;
 import net.minecraft.world.entity.npc.Villager;
+import net.minecraft.world.entity.npc.VillagerDataHolder;
 import net.minecraft.world.entity.npc.VillagerData;
 import net.minecraft.world.entity.npc.VillagerProfession;
 import net.minecraft.world.entity.npc.VillagerTrades;
@@ -21,7 +23,9 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.enchantment.Enchantment;
 import net.minecraft.world.item.enchantment.EnchantmentInstance;
+import net.minecraft.world.item.trading.Merchant;
 import net.minecraft.world.item.trading.MerchantOffer;
+import net.minecraft.world.item.trading.MerchantOffers;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
@@ -56,12 +60,16 @@ public final class TradeCatalogBuilder {
 
     /** Incremental catalog builder that performs all Minecraft calls on its owning game thread. */
     public static final class Session {
+        private final Level level;
         private final List<ListingTask> tasks = new ArrayList<>();
+        private final List<EntityType<?>> entityTypes = new ArrayList<>();
         private final Map<String, TradeRecipe> entries = new LinkedHashMap<>();
         private int cursor;
+        private int entityCursor;
         private boolean complete;
 
         private Session(Level level) {
+            this.level = level;
             Registry<VillagerProfession> professions = level.registryAccess()
                     .registryOrThrow(Registries.VILLAGER_PROFESSION);
             ResourceLocation villagerId = new ResourceLocation("minecraft", "villager");
@@ -98,11 +106,17 @@ public final class TradeCatalogBuilder {
                     }
                 }
             }
+
+            for (EntityType<?> entityType : BuiltInRegistries.ENTITY_TYPE) {
+                if (entityType != EntityType.VILLAGER && entityType != EntityType.WANDERING_TRADER) {
+                    entityTypes.add(entityType);
+                }
+            }
         }
 
         public boolean advance(long budgetNanos) {
             if (complete) return true;
-            if (cursor >= tasks.size()) {
+            if (cursor >= tasks.size() && entityCursor >= entityTypes.size()) {
                 complete = true;
                 return true;
             }
@@ -110,18 +124,56 @@ public final class TradeCatalogBuilder {
             long deadline = budgetNanos >= Long.MAX_VALUE / 2
                     ? Long.MAX_VALUE
                     : System.nanoTime() + Math.max(1L, budgetNanos);
-            int start = cursor;
+            int start = processedTasks();
             do {
-                ListingTask task = tasks.get(cursor++);
-                TradeRecipe recipe = buildListingVariants(task.merchant, task.listing,
-                        task.entityType, task.profession, task.workstations, task.level, task.seed);
-                if (recipe != null) {
+                if (cursor < tasks.size()) {
+                    ListingTask task = tasks.get(cursor++);
+                    TradeRecipe recipe = buildListingVariants(task.merchant, task.listing,
+                            task.entityType, task.profession, task.workstations, task.level, task.seed);
+                    if (recipe != null) {
+                        entries.merge(recipe.fingerprint(), recipe, TradeRecipe::merge);
+                    }
+                } else {
+                    scanMerchantEntityType(entityTypes.get(entityCursor++));
+                }
+            } while ((cursor < tasks.size() || entityCursor < entityTypes.size())
+                    && (processedTasks() == start + 1 || System.nanoTime() < deadline));
+
+            complete = cursor >= tasks.size() && entityCursor >= entityTypes.size();
+            return complete;
+        }
+
+        private void scanMerchantEntityType(EntityType<?> type) {
+            ResourceLocation entityId = BuiltInRegistries.ENTITY_TYPE.getKey(type);
+            Entity entity = null;
+            try {
+                entity = type.create(level);
+                if (!(entity instanceof Merchant merchant)) return;
+                MerchantOffers offers = merchant.getOffers();
+                if (offers == null || offers.isEmpty()) return;
+
+                ResourceLocation professionId = null;
+                List<ResourceLocation> workstations = List.of();
+                int merchantLevel = 0;
+                if (merchant instanceof VillagerDataHolder holder) {
+                    VillagerProfession profession = holder.getVillagerData().getProfession();
+                    professionId = level.registryAccess()
+                            .registryOrThrow(Registries.VILLAGER_PROFESSION)
+                            .getKey(profession);
+                    workstations = findWorkstations(level, profession);
+                    merchantLevel = holder.getVillagerData().getLevel();
+                }
+
+                for (MerchantOffer offer : offers) {
+                    TradeRecipe recipe = TradeRecipe.fromOffer(entityId, professionId,
+                            workstations, merchantLevel, offer);
                     entries.merge(recipe.fingerprint(), recipe, TradeRecipe::merge);
                 }
-            } while (cursor < tasks.size() && (cursor == start + 1 || System.nanoTime() < deadline));
-
-            complete = cursor >= tasks.size();
-            return complete;
+            } catch (RuntimeException | LinkageError ex) {
+                Jei_trade.LOGGER.debug("Could not inspect merchant entity type {}", entityId, ex);
+            } finally {
+                if (entity != null) entity.discard();
+            }
         }
 
         public boolean isComplete() {
@@ -129,11 +181,11 @@ public final class TradeCatalogBuilder {
         }
 
         public int processedTasks() {
-            return cursor;
+            return cursor + entityCursor;
         }
 
         public int totalTasks() {
-            return tasks.size();
+            return tasks.size() + entityTypes.size();
         }
 
         public List<TradeRecipe> snapshot() {

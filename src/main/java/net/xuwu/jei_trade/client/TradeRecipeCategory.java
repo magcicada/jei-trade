@@ -51,6 +51,12 @@ final class TradeRecipeCategory extends AbstractRecipeCategory<TradeRecipeGroup>
                     .addItemStack(workstation);
             workstationX += 20;
         }
+        ItemStack spawnEgg = group.sourceSpawnEggStack();
+        if (!spawnEgg.isEmpty()) {
+            builder.addInputSlot(workstationX, 4)
+                    .setStandardSlotBackground()
+                    .addItemStack(spawnEgg);
+        }
 
         for (int index = 0; index < group.trades().size(); index++) {
             TradeRecipe trade = group.trades().get(index);
@@ -92,7 +98,8 @@ final class TradeRecipeCategory extends AbstractRecipeCategory<TradeRecipeGroup>
                      double mouseX, double mouseY) {
         Minecraft minecraft = Minecraft.getInstance();
         int workstationCount = Math.min(group.workstationStacks().size(), 3);
-        int titleX = workstationCount == 0 ? 4 : 4 + workstationCount * 20 + 3;
+        int headerSlotCount = workstationCount + (group.sourceSpawnEggStack().isEmpty() ? 0 : 1);
+        int titleX = headerSlotCount == 0 ? 4 : 4 + headerSlotCount * 20 + 3;
         boolean wanderingTrader = group.entityType() != null
                 && "minecraft".equals(group.entityType().getNamespace())
                 && "wandering_trader".equals(group.entityType().getPath());
@@ -137,6 +144,11 @@ final class TradeRecipeCategory extends AbstractRecipeCategory<TradeRecipeGroup>
     }
 
     private static Component professionName(ResourceLocation profession) {
+        var professionValue = BuiltInRegistries.VILLAGER_PROFESSION.get(profession);
+        if (professionValue != null) {
+            String jerKey = "entity.minecraft.villager." + professionValue;
+            if (ClientLanguage.getInstance().has(jerKey)) return Component.translatable(jerKey);
+        }
         for (String key : professionTranslationKeys(profession)) {
             if (ClientLanguage.getInstance().has(key)) return Component.translatable(key);
         }

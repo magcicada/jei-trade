@@ -3,6 +3,9 @@ package net.xuwu.jei_trade;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.SpawnEggItem;
+import net.minecraftforge.common.ForgeSpawnEggItem;
+import net.minecraftforge.registries.ForgeRegistries;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -88,6 +91,14 @@ public final class TradeRecipeGroup {
             }
         }
         return result;
+    }
+
+    public ItemStack sourceSpawnEggStack() {
+        if (entityType == null) return ItemStack.EMPTY;
+        var type = ForgeRegistries.ENTITY_TYPES.getValue(entityType);
+        if (type == null) return ItemStack.EMPTY;
+        SpawnEggItem egg = ForgeSpawnEggItem.fromEntityType(type);
+        return egg == null ? ItemStack.EMPTY : new ItemStack(egg);
     }
 
     public List<TradeRecipe> trades() {
