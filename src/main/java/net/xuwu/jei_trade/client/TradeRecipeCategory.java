@@ -73,7 +73,8 @@ final class TradeRecipeCategory extends AbstractRecipeCategory<TradeRecipeGroup>
         slot.addRichTooltipCallback((view, tooltip) -> {
             int nbtVariants = trade.nbtVariantCount(variants);
             if (nbtVariants > 1) {
-                tooltip.add(Component.translatable("jei_trade.nbt_variants", nbtVariants)
+                boolean sameItem = variants.stream().allMatch(stack -> stack.is(variants.get(0).getItem()));
+                tooltip.add(Component.translatable(sameItem ? "jei_trade.nbt_variants" : "jei_trade.variants", nbtVariants)
                         .withStyle(ChatFormatting.GRAY));
                 int shown = 0;
                 java.util.Set<String> names = new java.util.LinkedHashSet<>();
@@ -110,10 +111,7 @@ final class TradeRecipeCategory extends AbstractRecipeCategory<TradeRecipeGroup>
             }
         }
         String name = stack.getHoverName().getString();
-        if (tag == null || tag.isEmpty()) return name;
-        String suffix = tag.toString();
-        if (suffix.length() > 42) suffix = suffix.substring(0, 39) + "...";
-        return name + " " + suffix;
+        return name;
     }
 
     @Override

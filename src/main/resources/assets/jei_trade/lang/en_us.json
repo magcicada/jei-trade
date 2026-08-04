@@ -8,6 +8,7 @@
   "jei_trade.uses": "Uses: %s/%s",
   "jei_trade.max_uses": "Max: %s",
   "jei_trade.nbt_variants": "NBT/component variants: %s",
+  "jei_trade.variants": "Possible item variants: %s",
   "jei_trade.nbt_more": "%s more variants",
   "jei_trade.count_range": "Count range: %s",
   "jei_trade.detail.random_dye": "Output is dyed randomly",

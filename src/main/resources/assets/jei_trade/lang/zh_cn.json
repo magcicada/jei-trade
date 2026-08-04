@@ -8,6 +8,7 @@
   "jei_trade.uses": "使用次数：%s/%s",
   "jei_trade.max_uses": "上限：%s",
   "jei_trade.nbt_variants": "NBT/组件变体：%s 个",
+  "jei_trade.variants": "可能的物品变体：%s 个",
   "jei_trade.nbt_more": "还有 %s 个变体",
   "jei_trade.count_range": "数量范围：%s",
   "jei_trade.detail.random_dye": "输出会随机染色",
