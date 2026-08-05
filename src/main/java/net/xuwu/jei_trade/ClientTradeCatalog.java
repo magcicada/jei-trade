@@ -13,15 +13,24 @@ import java.util.Map;
 /** Client-side catalog used by the JEI advanced recipe manager plugin. */
 public final class ClientTradeCatalog {
     private static final Map<String, TradeRecipe> ENTRIES = new LinkedHashMap<>();
+    private static volatile List<TradeRecipeGroup> GROUPS = List.of();
+    private static volatile long REVISION;
     private static boolean serverAuthoritative;
+    private static MerchantOffers lastObservedOffers;
+    private static int lastObservedSignature;
+    private static int lastObservedLevel;
 
     private ClientTradeCatalog() {
     }
 
     public static synchronized void replace(List<TradeRecipe> recipes) {
         ENTRIES.clear();
-        for (TradeRecipe recipe : recipes) add(recipe);
+        if (recipes != null) {
+            for (TradeRecipe recipe : recipes) mergeEntry(recipe);
+        }
         serverAuthoritative = true;
+        resetObservedOffers();
+        rebuildGroups();
     }
 
     public static synchronized void observeMerchant(Merchant merchant, int level) {
@@ -37,24 +46,37 @@ public final class ClientTradeCatalog {
                 if (entity.level() != null) workstations = TradeCatalogBuilder.findWorkstations(entity.level(), profession);
             }
         }
+        boolean changed = false;
         for (MerchantOffer offer : merchant.getOffers()) {
-            add(TradeRecipe.fromOffer(entityId, professionId, workstations, level, offer));
+            changed |= mergeEntry(TradeRecipe.fromOffer(entityId, professionId, workstations, level, offer));
         }
+        if (changed) rebuildGroups();
     }
 
     public static synchronized void observeOffers(MerchantOffers offers, int level) {
         if (serverAuthoritative || offers == null) return;
+        int signature = offerSignature(offers, level);
+        if (offers == lastObservedOffers && signature == lastObservedSignature
+                && level == lastObservedLevel) return;
+        lastObservedOffers = offers;
+        lastObservedSignature = signature;
+        lastObservedLevel = level;
+
+        boolean changed = false;
         for (MerchantOffer offer : offers) {
-            add(TradeRecipe.fromOffer(null, null, List.of(), level, offer));
+            changed |= mergeEntry(TradeRecipe.fromOffer(null, null, List.of(), level, offer));
         }
+        if (changed) rebuildGroups();
     }
 
     public static synchronized void addAll(List<TradeRecipe> recipes) {
-        for (TradeRecipe recipe : recipes) add(recipe);
+        boolean changed = false;
+        for (TradeRecipe recipe : recipes) changed |= mergeEntry(recipe);
+        if (changed) rebuildGroups();
     }
 
     public static synchronized void add(TradeRecipe recipe) {
-        ENTRIES.merge(recipe.fingerprint(), recipe, TradeRecipe::merge);
+        if (mergeEntry(recipe)) rebuildGroups();
     }
 
     public static synchronized List<TradeRecipe> snapshot() {
@@ -62,15 +84,63 @@ public final class ClientTradeCatalog {
     }
 
     public static synchronized List<TradeRecipeGroup> snapshotGroups() {
-        return TradeRecipeGroup.buildPages(snapshot());
+        return GROUPS;
     }
 
     public static synchronized void clear() {
+        boolean changed = !ENTRIES.isEmpty() || !GROUPS.isEmpty() || serverAuthoritative;
         ENTRIES.clear();
         serverAuthoritative = false;
+        resetObservedOffers();
+        if (changed) rebuildGroups();
     }
 
     public static synchronized boolean isServerAuthoritative() {
         return serverAuthoritative;
+    }
+
+    public static long revision() {
+        return REVISION;
+    }
+
+    private static boolean mergeEntry(TradeRecipe recipe) {
+        if (recipe == null) return false;
+        String key = recipe.fingerprint();
+        TradeRecipe previous = ENTRIES.get(key);
+        if (previous == null) {
+            ENTRIES.put(key, recipe);
+            return true;
+        }
+
+        TradeRecipe merged = TradeRecipe.merge(previous, recipe);
+        if (merged == previous) return false;
+        ENTRIES.put(key, merged);
+        return true;
+    }
+
+    private static void rebuildGroups() {
+        GROUPS = List.copyOf(TradeRecipeGroup.buildPages(new ArrayList<>(ENTRIES.values())));
+        REVISION++;
+    }
+
+    private static void resetObservedOffers() {
+        lastObservedOffers = null;
+        lastObservedSignature = 0;
+        lastObservedLevel = 0;
+    }
+
+    private static int offerSignature(MerchantOffers offers, int level) {
+        int signature = 31 + level;
+        for (MerchantOffer offer : offers) {
+            signature = 31 * signature + offer.getCostA().hashCode();
+            signature = 31 * signature + offer.getCostB().hashCode();
+            signature = 31 * signature + offer.getResult().hashCode();
+            signature = 31 * signature + offer.getMaxUses();
+            signature = 31 * signature + offer.getDemand();
+            signature = 31 * signature + offer.getSpecialPriceDiff();
+            signature = 31 * signature + Float.floatToIntBits(offer.getPriceMultiplier());
+            signature = 31 * signature + (offer.shouldRewardExp() ? 1 : 0);
+        }
+        return signature;
     }
 }

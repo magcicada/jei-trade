@@ -96,8 +96,8 @@ final class TradeRecipeCategory extends AbstractRecipeCategory<TradeRecipeGroup>
     public void draw(TradeRecipeGroup group, IRecipeSlotsView slots, GuiGraphics graphics,
                      double mouseX, double mouseY) {
         Minecraft minecraft = Minecraft.getInstance();
-        int workstationCount = Math.min(group.workstationStacks().size(), 3);
-        int headerSlotCount = workstationCount + (group.sourceSpawnEggStack().isEmpty() ? 0 : 1);
+        int workstationCount = Math.min(group.workstationCount(), 3);
+        int headerSlotCount = workstationCount + (group.hasSourceSpawnEgg() ? 1 : 0);
         int titleX = headerSlotCount == 0 ? 4 : 4 + headerSlotCount * 20 + 3;
         boolean wanderingTrader = group.entityType() != null
                 && "minecraft".equals(group.entityType().getNamespace())

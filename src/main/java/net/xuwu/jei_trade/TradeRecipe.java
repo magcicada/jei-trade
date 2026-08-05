@@ -39,6 +39,7 @@ public final class TradeRecipe {
     private final int specialPrice;
     private final boolean rewardExp;
     private final List<Component> details;
+    private final String fingerprint;
 
     public TradeRecipe(ResourceLocation entityType, ResourceLocation profession,
                        List<ResourceLocation> workstations, int level,
@@ -93,6 +94,8 @@ public final class TradeRecipe {
         this.specialPrice = specialPrice;
         this.rewardExp = rewardExp;
         this.details = List.copyOf(details);
+        this.fingerprint = logicalFingerprint(entityType, profession, this.workstations, level,
+                this.buyAVariants.get(0), this.buyBVariants.get(0), this.resultVariants.get(0));
     }
 
     public static TradeRecipe fromOffer(ResourceLocation entityType, ResourceLocation profession,
@@ -147,16 +150,31 @@ public final class TradeRecipe {
     /** Combines random/NBT variants of the same logical trade without losing any stack. */
     public static TradeRecipe merge(TradeRecipe left, TradeRecipe right) {
         if (!left.fingerprint().equals(right.fingerprint())) return left;
+        List<ItemStack> buyAVariants = union(left.buyAVariants, right.buyAVariants);
+        List<ItemStack> buyBVariants = union(left.buyBVariants, right.buyBVariants);
+        List<ItemStack> resultVariants = union(left.resultVariants, right.resultVariants);
+        int buyAMin = Math.min(left.buyAMin, right.buyAMin);
+        int buyAMax = Math.max(left.buyAMax, right.buyAMax);
+        int buyBMin = Math.min(left.buyBMin, right.buyBMin);
+        int buyBMax = Math.max(left.buyBMax, right.buyBMax);
+        int resultMin = Math.min(left.resultMin, right.resultMin);
+        int resultMax = Math.max(left.resultMax, right.resultMax);
+        int maxUses = Math.max(left.maxUses, right.maxUses);
+        List<Component> details = unionDetails(left.details, right.details);
+        if (sameVariants(left.buyAVariants, buyAVariants)
+                && sameVariants(left.buyBVariants, buyBVariants)
+                && sameVariants(left.resultVariants, resultVariants)
+                && left.buyAMin == buyAMin && left.buyAMax == buyAMax
+                && left.buyBMin == buyBMin && left.buyBMax == buyBMax
+                && left.resultMin == resultMin && left.resultMax == resultMax
+                && left.maxUses == maxUses && left.details.equals(details)) {
+            return left;
+        }
         return new TradeRecipe(left.entityType, left.profession, left.workstations, left.level,
-                union(left.buyAVariants, right.buyAVariants),
-                union(left.buyBVariants, right.buyBVariants),
-                union(left.resultVariants, right.resultVariants),
-                Math.min(left.buyAMin, right.buyAMin), Math.max(left.buyAMax, right.buyAMax),
-                Math.min(left.buyBMin, right.buyBMin), Math.max(left.buyBMax, right.buyBMax),
-                Math.min(left.resultMin, right.resultMin), Math.max(left.resultMax, right.resultMax),
-                left.uses, Math.max(left.maxUses, right.maxUses), left.xp,
-                left.priceMultiplier, left.demand, left.specialPrice, left.rewardExp,
-                unionDetails(left.details, right.details));
+                buyAVariants, buyBVariants, resultVariants,
+                buyAMin, buyAMax, buyBMin, buyBMax, resultMin, resultMax,
+                left.uses, maxUses, left.xp, left.priceMultiplier,
+                left.demand, left.specialPrice, left.rewardExp, details);
     }
 
     public static TradeRecipe read(FriendlyByteBuf buf) {
@@ -327,8 +345,7 @@ public final class TradeRecipe {
     }
 
     public String fingerprint() {
-        return logicalFingerprint(entityType, profession, workstations, level,
-                buyAVariants.get(0), buyBVariants.get(0), resultVariants.get(0));
+        return fingerprint;
     }
 
     static String logicalFingerprint(ResourceLocation entityType, ResourceLocation profession,
@@ -370,6 +387,15 @@ public final class TradeRecipe {
             if (result.size() >= 32) break;
         }
         return List.copyOf(result);
+    }
+
+    private static boolean sameVariants(List<ItemStack> left, List<ItemStack> right) {
+        if (left.size() != right.size()) return false;
+        for (int index = 0; index < left.size(); index++) {
+            if (!stackFingerprintIgnoringCount(left.get(index))
+                    .equals(stackFingerprintIgnoringCount(right.get(index)))) return false;
+        }
+        return true;
     }
 
     static String stackFingerprintIgnoringCount(ItemStack stack) {

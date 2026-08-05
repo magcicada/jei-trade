@@ -23,6 +23,7 @@ public final class TradeJeiPlugin implements IModPlugin {
             Jei_trade.MODID, "villager_trade", TradeRecipeGroup.class);
     private static final Map<String, TradeRecipeGroup> REGISTERED_RECIPE_GROUPS = new HashMap<>();
     private static IRecipeManager recipeManager;
+    private static long lastCatalogRevision = Long.MIN_VALUE;
 
     @Override
     public ResourceLocation getPluginUid() {
@@ -40,6 +41,7 @@ public final class TradeJeiPlugin implements IModPlugin {
         List<TradeRecipeGroup> groups = ClientTradeCatalog.snapshotGroups();
         registration.addRecipes(TRADE_RECIPE_TYPE, groups);
         groups.forEach(group -> REGISTERED_RECIPE_GROUPS.put(group.fingerprint(), group));
+        lastCatalogRevision = ClientTradeCatalog.revision();
     }
 
     @Override
@@ -52,10 +54,13 @@ public final class TradeJeiPlugin implements IModPlugin {
     public void onRuntimeUnavailable() {
         recipeManager = null;
         REGISTERED_RECIPE_GROUPS.clear();
+        lastCatalogRevision = Long.MIN_VALUE;
     }
 
     public static void refreshRecipes() {
         if (recipeManager == null) return;
+        long catalogRevision = ClientTradeCatalog.revision();
+        if (catalogRevision == lastCatalogRevision) return;
         List<TradeRecipeGroup> current = ClientTradeCatalog.snapshotGroups();
         Map<String, TradeRecipeGroup> currentByKey = current.stream()
                 .collect(Collectors.toMap(TradeRecipeGroup::fingerprint,
@@ -75,5 +80,6 @@ public final class TradeJeiPlugin implements IModPlugin {
                 .toList();
         if (!pending.isEmpty()) recipeManager.addRecipes(TRADE_RECIPE_TYPE, pending);
         pending.forEach(group -> REGISTERED_RECIPE_GROUPS.put(group.fingerprint(), group));
+        lastCatalogRevision = catalogRevision;
     }
 }

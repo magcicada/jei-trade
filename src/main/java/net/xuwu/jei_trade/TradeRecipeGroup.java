@@ -26,6 +26,9 @@ public final class TradeRecipeGroup {
     private final int page;
     private final int pageCount;
     private final int totalTrades;
+    private final List<ItemStack> workstationStacks;
+    private final ItemStack sourceSpawnEggStack;
+    private final String fingerprint;
 
     private TradeRecipeGroup(String groupKey, ResourceLocation entityType, ResourceLocation profession,
                              List<ResourceLocation> workstations, List<TradeRecipe> trades,
@@ -38,6 +41,9 @@ public final class TradeRecipeGroup {
         this.page = page;
         this.pageCount = pageCount;
         this.totalTrades = totalTrades;
+        this.workstationStacks = createWorkstationStacks(this.workstations);
+        this.sourceSpawnEggStack = createSourceSpawnEggStack(entityType);
+        this.fingerprint = buildFingerprint(groupKey, page, this.trades);
     }
 
     public static List<TradeRecipeGroup> buildPages(List<TradeRecipe> recipes) {
@@ -83,6 +89,14 @@ public final class TradeRecipeGroup {
     }
 
     public List<ItemStack> workstationStacks() {
+        return workstationStacks;
+    }
+
+    public int workstationCount() {
+        return workstationStacks.size();
+    }
+
+    private static List<ItemStack> createWorkstationStacks(List<ResourceLocation> workstations) {
         List<ItemStack> result = new ArrayList<>();
         for (ResourceLocation id : workstations) {
             var block = BuiltInRegistries.BLOCK.get(id);
@@ -94,6 +108,14 @@ public final class TradeRecipeGroup {
     }
 
     public ItemStack sourceSpawnEggStack() {
+        return sourceSpawnEggStack;
+    }
+
+    public boolean hasSourceSpawnEgg() {
+        return !sourceSpawnEggStack.isEmpty();
+    }
+
+    private static ItemStack createSourceSpawnEggStack(ResourceLocation entityType) {
         if (entityType == null) return ItemStack.EMPTY;
         var type = ForgeRegistries.ENTITY_TYPES.getValue(entityType);
         if (type == null) return ItemStack.EMPTY;
@@ -126,6 +148,10 @@ public final class TradeRecipeGroup {
     }
 
     public String fingerprint() {
+        return fingerprint;
+    }
+
+    private static String buildFingerprint(String groupKey, int page, List<TradeRecipe> trades) {
         return groupKey + "|page=" + page + '|' + trades.stream()
                 .map(TradeRecipe::variantsFingerprint)
                 .reduce((left, right) -> left + ";" + right)
