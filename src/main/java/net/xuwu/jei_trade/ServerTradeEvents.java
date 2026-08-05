@@ -115,7 +115,7 @@ public final class ServerTradeEvents {
             removeBuilder(server, job);
             setStatus(server, job.extended
                     ? "real-entity rebuild failed"
-                    : "normal mixed-sampling catalog build failed");
+                    : "normal 100-sample catalog build failed");
             if (job.source != null) {
                 job.source.sendFailure(Component.literal("JEI Trade catalog build failed: "
                         + unwrap(error).getMessage()));
@@ -129,7 +129,7 @@ public final class ServerTradeEvents {
         catalog.replace(recipes == null ? List.of() : recipes);
         List<TradeRecipe> synchronizedRecipes = catalog.snapshot();
         syncAll(server, synchronizedRecipes);
-        String mode = job.extended ? "extended real-entity" : "normal null-listing/one-entity";
+        String mode = job.extended ? "extended real-entity" : "normal null-listing/100-entity-sample";
         setStatus(server, "saving " + synchronizedRecipes.size() + " " + mode + " entries");
         if (job.source != null) {
             job.source.sendSuccess(() -> Component.literal("JEI Trade " + mode
@@ -139,7 +139,7 @@ public final class ServerTradeEvents {
         if (!job.extended) {
             setStatus(server, "ready: " + synchronizedRecipes.size()
                     + " normal entries; run /jeitrade rebuild to cache 100 custom samples");
-            Jei_trade.LOGGER.info("Normal null-listing/one-entity catalog is ready with {} entries; it was not cached",
+            Jei_trade.LOGGER.info("Normal null-listing/100-entity-sample catalog is ready with {} entries; it was not cached",
                     synchronizedRecipes.size());
             return;
         }
@@ -260,7 +260,7 @@ public final class ServerTradeEvents {
                     : "building normal catalog in background");
             launchBuild(server, job);
         }
-        Jei_trade.LOGGER.info("Started normal 100-null-sample villager trade catalog discovery in background");
+        Jei_trade.LOGGER.info("Started normal null-listing/100-entity-sample trade catalog discovery in background");
     }
 
     private static void launchBuild(MinecraftServer server, BuildJob job) {

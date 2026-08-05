@@ -8,7 +8,6 @@ import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraft.util.RandomSource;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.ai.village.poi.PoiType;
@@ -37,7 +36,7 @@ import java.util.Set;
 /** Builds a deterministic catalog from the actual registered villager trade factories. */
 public final class TradeCatalogBuilder {
     private static final int UNKNOWN_LISTING_SAMPLES = 1;
-    private static final int NORMAL_MERCHANT_ENTITY_SAMPLES = 1;
+    private static final int NORMAL_MERCHANT_ENTITY_SAMPLES = 100;
     private static final int EXTENDED_MERCHANT_ENTITY_SAMPLES = 100;
     private static final int MAX_VARIANTS = 256;
 
@@ -90,8 +89,8 @@ public final class TradeCatalogBuilder {
 
     /**
      * Catalog builder. Villager and wandering-trader listing callbacks are always attempted with
-     * null arguments. Custom Merchant entity discovery uses one real sample normally and 100
-     * real samples only for the explicit rebuild command.
+     * null arguments. Custom Merchant entity discovery uses 100 real samples both during normal
+     * no-cache startup and during the explicit rebuild command.
      */
     public static final class Session {
         private final Level level;
@@ -299,7 +298,6 @@ public final class TradeCatalogBuilder {
                 if (!(entity instanceof Merchant createdMerchant)) return true;
                 merchant = createdMerchant;
                 MerchantOffers offers = merchant.getOffers();
-                List<MerchantOffer> declaredOffers = findDeclaredMerchantOffers(entity, type, samples);
                 ResourceLocation professionId = null;
                 List<ResourceLocation> workstations = List.of();
                 int merchantLevel = 0;
@@ -317,10 +315,6 @@ public final class TradeCatalogBuilder {
                         session.acceptOffer(entityId, professionId, workstations, merchantLevel, offer);
                     }
                 }
-                for (MerchantOffer offer : declaredOffers) {
-                    session.acceptOffer(entityId, professionId, workstations, merchantLevel, offer);
-                }
-
                 samples++;
                 return samples >= session.merchantSampleLimit();
             } catch (RuntimeException | LinkageError ex) {
@@ -427,62 +421,6 @@ public final class TradeCatalogBuilder {
         }
     }
 
-    /** Reads Goblin Traders' public, data-driven trade table without making it a required dependency. */
-    private static List<MerchantOffer> findDeclaredMerchantOffers(Entity entity, EntityType<?> type,
-                                                                   int sample) {
-        ResourceLocation entityId = BuiltInRegistries.ENTITY_TYPE.getKey(type);
-        if (entityId == null || !"goblintraders".equals(entityId.getNamespace())) return List.of();
-
-        try {
-            Class<?> managerClass = Class.forName("com.mrcrayfish.goblintraders.trades.TradeManager");
-            Object manager = managerClass.getMethod("instance").invoke(null);
-            Object entityTrades = managerClass.getMethod("getTrades", EntityType.class).invoke(manager, type);
-            if (entityTrades == null) return List.of();
-
-            java.lang.reflect.Method mapAccessor;
-            try {
-                mapAccessor = entityTrades.getClass().getMethod("getTradeMap");
-            } catch (NoSuchMethodException ignored) {
-                mapAccessor = entityTrades.getClass().getMethod("map");
-            }
-            Object rawMap = mapAccessor.invoke(entityTrades);
-            if (!(rawMap instanceof Map<?, ?> tradeMap)) return List.of();
-
-            List<MerchantOffer> found = new ArrayList<>();
-            int index = 0;
-            for (Object rawDefinitions : tradeMap.values()) {
-                if (!(rawDefinitions instanceof Iterable<?> definitions)) continue;
-                for (Object definition : definitions) {
-                    RandomSource random = RandomSource.create(seedFor(entityId, sample, index++));
-                    try {
-                        MerchantOffer offer = declaredOffer(definition, entity, random);
-                        if (offer != null) found.add(offer);
-                    } catch (ReflectiveOperationException | RuntimeException | LinkageError ex) {
-                        Jei_trade.LOGGER.debug("Could not inspect declared trade for {}", entityId, ex);
-                    }
-                }
-            }
-            return List.copyOf(found);
-        } catch (ReflectiveOperationException | RuntimeException | LinkageError ex) {
-            Jei_trade.LOGGER.debug("Could not read declared trades for {}", entityId, ex);
-            return List.of();
-        }
-    }
-
-    private static MerchantOffer declaredOffer(Object definition, Entity entity, RandomSource random)
-            throws ReflectiveOperationException {
-        if (definition instanceof VillagerTrades.ItemListing listing) {
-            return listing.getOffer(entity, random);
-        }
-        for (java.lang.reflect.Method method : definition.getClass().getMethods()) {
-            if (method.getName().equals("createVanillaOffer") && method.getParameterCount() == 2) {
-                Object offer = method.invoke(definition, entity, random);
-                return offer instanceof MerchantOffer merchantOffer ? merchantOffer : null;
-            }
-        }
-        return null;
-    }
-
     private static TradeRecipe expandEnchantedBookVariants(TradeRecipe base) {
         List<ItemStack> books = new ArrayList<>();
         int minEmeralds = Integer.MAX_VALUE;
@@ -544,8 +482,4 @@ public final class TradeCatalogBuilder {
         return new ArrayList<>(unique.values());
     }
 
-    private static long seedFor(ResourceLocation profession, int level, int index) {
-        long seed = profession.hashCode() * 31L + level * 997L + index * 131L;
-        return seed ^ 0x5DEECE66DL;
-    }
 }
