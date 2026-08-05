@@ -20,6 +20,11 @@ public final class Config {
             .comment("Maximum number of trade entries sent to one client.")
             .defineInRange("maxCatalogEntries", 10000, 100, 100000);
 
+    public static final ForgeConfigSpec.IntValue REBUILD_BUDGET_MICROS = BUILDER
+            .comment("Maximum main-thread time budget per server tick while the trade catalog is sampling.",
+                    "Entity and trade callbacks are advanced in small server-thread slices for compatibility with threaded chunk engines.")
+            .defineInRange("rebuildBudgetMicros", 1000, 100, 10000);
+
     public static final ForgeConfigSpec SPEC = BUILDER.build();
 
     private Config() {

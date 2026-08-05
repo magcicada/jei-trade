@@ -15,6 +15,7 @@ import net.minecraftforge.event.entity.player.PlayerInteractEvent;
 import net.minecraftforge.event.server.ServerStartedEvent;
 import net.minecraftforge.event.server.ServerStoppingEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
+import net.minecraftforge.fml.ModList;
 import net.minecraftforge.fml.common.Mod;
 
 import java.io.IOException;
@@ -25,6 +26,7 @@ import java.util.Optional;
 import java.util.WeakHashMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -242,7 +244,9 @@ public final class ServerTradeEvents {
             launchBuild(server, job);
         }
         source.sendSuccess(() -> Component.literal("Started JEI Trade extended 100-sample rebuild. "
-                + "Real-entity sampling runs on a dedicated background thread."), true);
+                + (ModList.get().isLoaded("c2me")
+                ? "C2ME-safe sampling uses short server-thread slices; orchestration runs in the background."
+                : "Real-entity sampling runs on a dedicated background thread.")), true);
         return 1;
     }
 
@@ -251,24 +255,81 @@ public final class ServerTradeEvents {
             if (!isCurrent(server, revision) || BUILDERS.containsKey(server)) return;
             BuildJob job = new BuildJob(null, revision, false);
             BUILDERS.put(server, job);
-            STATUS.put(server, "building normal catalog with 100 null samples in background");
+            STATUS.put(server, ModList.get().isLoaded("c2me")
+                    ? "building normal catalog through C2ME-safe background bridge"
+                    : "building normal catalog in background");
             launchBuild(server, job);
         }
         Jei_trade.LOGGER.info("Started normal 100-null-sample villager trade catalog discovery in background");
     }
 
     private static void launchBuild(MinecraftServer server, BuildJob job) {
-        CompletableFuture<List<TradeRecipe>> future = CompletableFuture.supplyAsync(() -> {
-            if (job.extended) {
-                return TradeCatalogBuilder.buildReal(server.overworld());
-            }
-            return TradeCatalogBuilder.buildNormal(server.overworld());
-        }, SAMPLE_WORKER);
+        CompletableFuture<List<TradeRecipe>> future = CompletableFuture.supplyAsync(
+                () -> buildCatalog(server, job.extended), SAMPLE_WORKER);
         job.future = future;
         future.whenComplete((recipes, error) -> {
             if (!isCurrent(server, job.revision)) return;
             server.execute(() -> finishBuild(server, job, recipes, error));
         });
+    }
+
+    private static List<TradeRecipe> buildCatalog(MinecraftServer server, boolean extended) {
+        if (!ModList.get().isLoaded("c2me")) {
+            return extended
+                    ? TradeCatalogBuilder.buildReal(server.overworld())
+                    : TradeCatalogBuilder.buildNormal(server.overworld());
+        }
+
+        return buildCatalogThroughServerThread(server, extended);
+    }
+
+    /**
+     * C2ME protects the server world's random source and rejects entity/world calls from worker
+     * threads. Keep the catalog worker and its cancellation semantics, but execute only short
+     * Minecraft sampling slices on the server thread.
+     */
+    private static List<TradeRecipe> buildCatalogThroughServerThread(MinecraftServer server,
+                                                                       boolean extended) {
+        CompletableFuture<TradeCatalogBuilder.Session> created = new CompletableFuture<>();
+        server.execute(() -> {
+            try {
+                created.complete(extended
+                        ? TradeCatalogBuilder.extendedSession(server.overworld())
+                        : TradeCatalogBuilder.session(server.overworld()));
+            } catch (Throwable error) {
+                created.completeExceptionally(error);
+            }
+        });
+        TradeCatalogBuilder.Session session = await(created);
+        long budgetNanos = Math.max(1L, Config.REBUILD_BUDGET_MICROS.get()) * 1_000L;
+        while (true) {
+            if (!server.isRunning() || Thread.currentThread().isInterrupted()) {
+                throw new CompletionException(new java.util.concurrent.CancellationException(
+                        "Minecraft server stopped during C2ME-safe trade sampling"));
+            }
+            CompletableFuture<Boolean> step = new CompletableFuture<>();
+            server.execute(() -> {
+                try {
+                    step.complete(session.advance(budgetNanos));
+                } catch (Throwable error) {
+                    step.completeExceptionally(error);
+                }
+            });
+            if (await(step)) return session.snapshot();
+        }
+    }
+
+    private static <T> T await(CompletableFuture<T> future) {
+        try {
+            return future.get();
+        } catch (InterruptedException error) {
+            Thread.currentThread().interrupt();
+            throw new CompletionException(error);
+        } catch (ExecutionException error) {
+            Throwable cause = error.getCause() == null ? error : error.getCause();
+            throw cause instanceof CompletionException completion ? completion
+                    : new CompletionException(cause);
+        }
     }
 
     private static int reportStatus(CommandSourceStack source) {
