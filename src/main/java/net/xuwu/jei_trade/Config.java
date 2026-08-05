@@ -20,11 +20,6 @@ public final class Config {
             .comment("Maximum number of trade entries sent to one client.")
             .defineInRange("maxCatalogEntries", 10000, 100, 100000);
 
-    public static final ForgeConfigSpec.IntValue REBUILD_BUDGET_MICROS = BUILDER
-            .comment("Maximum main-thread time budget per server tick while /jeitrade rebuild is sampling.",
-                    "Minecraft entity and trade callbacks are not thread-safe, so they are advanced in small tick slices.")
-            .defineInRange("rebuildBudgetMicros", 1000, 100, 10000);
-
     public static final ForgeConfigSpec SPEC = BUILDER.build();
 
     private Config() {

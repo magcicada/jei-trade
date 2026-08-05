@@ -3,7 +3,6 @@ package net.xuwu.jei_trade;
 import io.netty.buffer.Unpooled;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.world.level.storage.LevelResource;
 
 import java.io.IOException;
 import java.nio.file.AtomicMoveNotSupportedException;
@@ -14,10 +13,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
-/** Versioned, per-world binary cache for the completed synchronized trade catalog. */
+/** Versioned, global binary cache for the completed synchronized trade catalog. */
 final class TradeCatalogCache {
     private static final int MAGIC = 0x4A544344; // JTCD
-    private static final int FORMAT_VERSION = 1;
+    private static final int FORMAT_VERSION = 3;
     private static final int MAX_RECIPES = 100_000;
     private static final long MAX_CACHE_BYTES = 256L * 1024L * 1024L;
     private static final String CACHE_FILE = "trade_catalog-1.20.1.bin";
@@ -26,8 +25,8 @@ final class TradeCatalogCache {
     }
 
     static Path path(MinecraftServer server) {
-        return server.getWorldPath(LevelResource.ROOT)
-                .resolve("data").resolve(Jei_trade.MODID).resolve(CACHE_FILE);
+        return server.getServerDirectory().toPath()
+                .resolve("config").resolve(Jei_trade.MODID).resolve(CACHE_FILE);
     }
 
     static Optional<List<TradeRecipe>> load(Path path) throws IOException {

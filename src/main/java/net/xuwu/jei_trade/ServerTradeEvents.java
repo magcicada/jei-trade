@@ -5,13 +5,11 @@ import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.npc.VillagerDataHolder;
 import net.minecraft.world.item.trading.Merchant;
 import net.minecraftforge.event.RegisterCommandsEvent;
-import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.event.entity.player.PlayerInteractEvent;
 import net.minecraftforge.event.server.ServerStartedEvent;
@@ -38,6 +36,11 @@ public final class ServerTradeEvents {
     private static final Map<MinecraftServer, String> STATUS = new WeakHashMap<>();
     private static final ExecutorService CACHE_WORKER = Executors.newSingleThreadExecutor(task -> {
         Thread thread = new Thread(task, "JEI Trade catalog cache");
+        thread.setDaemon(true);
+        return thread;
+    });
+    private static final ExecutorService SAMPLE_WORKER = Executors.newSingleThreadExecutor(task -> {
+        Thread thread = new Thread(task, "JEI Trade catalog sampling");
         thread.setDaemon(true);
         return thread;
     });
@@ -103,30 +106,40 @@ public final class ServerTradeEvents {
                 catalog.snapshot().size(), cachePath);
     }
 
-    @SubscribeEvent
-    public static void onServerTick(TickEvent.ServerTickEvent event) {
-        if (event.phase != TickEvent.Phase.END) return;
-        MinecraftServer server = event.getServer();
-        BuildJob job = builder(server);
-        if (job == null) return;
-
-        long budgetNanos = Math.max(1L, Config.REBUILD_BUDGET_MICROS.get()) * 1_000L;
-        if (!job.session.advance(budgetNanos)) {
-            setStatus(server, "rebuilding: " + job.session.progressDescription());
+    private static void finishBuild(MinecraftServer server, BuildJob job,
+                                    List<TradeRecipe> recipes, Throwable error) {
+        if (!isCurrent(server, job.revision) || builder(server) != job) return;
+        if (error != null) {
+            removeBuilder(server, job);
+            setStatus(server, job.extended
+                    ? "real-entity rebuild failed"
+                    : "normal mixed-sampling catalog build failed");
+            if (job.source != null) {
+                job.source.sendFailure(Component.literal("JEI Trade catalog build failed: "
+                        + unwrap(error).getMessage()));
+            }
+            Jei_trade.LOGGER.error("Could not build JEI Trade catalog", unwrap(error));
             return;
         }
 
         removeBuilder(server, job);
-        List<TradeRecipe> recipes = job.session.snapshot();
         TradeServerCatalog catalog = catalog(server);
-        catalog.replace(recipes);
+        catalog.replace(recipes == null ? List.of() : recipes);
         List<TradeRecipe> synchronizedRecipes = catalog.snapshot();
         syncAll(server, synchronizedRecipes);
-        String mode = job.extended ? "extended" : "normal";
+        String mode = job.extended ? "extended real-entity" : "normal null-listing/one-entity";
         setStatus(server, "saving " + synchronizedRecipes.size() + " " + mode + " entries");
         if (job.source != null) {
-            job.source.sendSuccess(() -> Component.literal("JEI Trade " + mode + " catalog build completed with "
-                    + synchronizedRecipes.size() + " entries; saving cache in the background."), true);
+            job.source.sendSuccess(() -> Component.literal("JEI Trade " + mode
+                    + " catalog build completed with " + synchronizedRecipes.size()
+                    + (job.extended ? " entries; saving cache in the background." : " entries.")), true);
+        }
+        if (!job.extended) {
+            setStatus(server, "ready: " + synchronizedRecipes.size()
+                    + " normal entries; run /jeitrade rebuild to cache 100 custom samples");
+            Jei_trade.LOGGER.info("Normal null-listing/one-entity catalog is ready with {} entries; it was not cached",
+                    synchronizedRecipes.size());
+            return;
         }
 
         Path cachePath = TradeCatalogCache.path(server);
@@ -138,9 +151,10 @@ public final class ServerTradeEvents {
             } catch (IOException ex) {
                 throw new CompletionException(ex);
             }
-        }, CACHE_WORKER).whenComplete((saved, error) -> {
+        }, CACHE_WORKER).whenComplete((saved, saveError) -> {
             if (!isCurrent(server, job.revision)) return;
-            server.execute(() -> finishCacheSave(server, job, cachePath, synchronizedRecipes.size(), saved, error));
+            server.execute(() -> finishCacheSave(server, job, cachePath,
+                    synchronizedRecipes.size(), saved, saveError));
         });
     }
 
@@ -168,7 +182,8 @@ public final class ServerTradeEvents {
     public static void onServerStopping(ServerStoppingEvent event) {
         MinecraftServer server = event.getServer();
         synchronized (ServerTradeEvents.class) {
-            BUILDERS.remove(server);
+            BuildJob job = BUILDERS.remove(server);
+            if (job != null && job.future != null) job.future.cancel(true);
             CATALOGS.remove(server);
             REVISIONS.remove(server);
             STATUS.remove(server);
@@ -217,35 +232,48 @@ public final class ServerTradeEvents {
             BuildJob existing = BUILDERS.get(server);
             if (existing != null) {
                 source.sendFailure(Component.literal("A JEI Trade rebuild is already running: "
-                        + existing.session.progressDescription()));
+                        + status(server)));
                 return 0;
             }
-            ServerLevel level = server.overworld();
             long revision = nextRevisionLocked(server);
-            BuildJob job = new BuildJob(TradeCatalogBuilder.extendedSession(level), source, revision, true);
+            BuildJob job = new BuildJob(source, revision, true);
             BUILDERS.put(server, job);
-            STATUS.put(server, "rebuilding: " + job.session.progressDescription());
+            STATUS.put(server, "rebuilding with real entities in background (100 samples)");
+            launchBuild(server, job);
         }
         source.sendSuccess(() -> Component.literal("Started JEI Trade extended 100-sample rebuild. "
-                + "Sampling is spread across server ticks; cache work runs on a dedicated background thread."), true);
+                + "Real-entity sampling runs on a dedicated background thread."), true);
         return 1;
     }
 
     private static void startNormalBuild(MinecraftServer server, long revision) {
         synchronized (ServerTradeEvents.class) {
             if (!isCurrent(server, revision) || BUILDERS.containsKey(server)) return;
-            BuildJob job = new BuildJob(TradeCatalogBuilder.session(server.overworld()), null, revision, false);
+            BuildJob job = new BuildJob(null, revision, false);
             BUILDERS.put(server, job);
-            STATUS.put(server, "building normal catalog");
+            STATUS.put(server, "building normal catalog with 100 null samples in background");
+            launchBuild(server, job);
         }
-        Jei_trade.LOGGER.info("Started normal incremental villager trade catalog discovery");
+        Jei_trade.LOGGER.info("Started normal 100-null-sample villager trade catalog discovery in background");
+    }
+
+    private static void launchBuild(MinecraftServer server, BuildJob job) {
+        CompletableFuture<List<TradeRecipe>> future = CompletableFuture.supplyAsync(() -> {
+            if (job.extended) {
+                return TradeCatalogBuilder.buildReal(server.overworld());
+            }
+            return TradeCatalogBuilder.buildNormal(server.overworld());
+        }, SAMPLE_WORKER);
+        job.future = future;
+        future.whenComplete((recipes, error) -> {
+            if (!isCurrent(server, job.revision)) return;
+            server.execute(() -> finishBuild(server, job, recipes, error));
+        });
     }
 
     private static int reportStatus(CommandSourceStack source) {
         MinecraftServer server = source.getServer();
-        BuildJob job = builder(server);
-        String status = job == null ? status(server) : "rebuilding: " + job.session.progressDescription();
-        source.sendSuccess(() -> Component.literal("JEI Trade status: " + status), false);
+        source.sendSuccess(() -> Component.literal("JEI Trade status: " + status(server)), false);
         return 1;
     }
 
@@ -294,14 +322,12 @@ public final class ServerTradeEvents {
     }
 
     private static final class BuildJob {
-        private final TradeCatalogBuilder.Session session;
         private final CommandSourceStack source;
         private final long revision;
         private final boolean extended;
+        private volatile CompletableFuture<List<TradeRecipe>> future;
 
-        private BuildJob(TradeCatalogBuilder.Session session, CommandSourceStack source,
-                         long revision, boolean extended) {
-            this.session = session;
+        private BuildJob(CommandSourceStack source, long revision, boolean extended) {
             this.source = source;
             this.revision = revision;
             this.extended = extended;

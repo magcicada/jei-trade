@@ -118,7 +118,9 @@ final class TradeListingResolver {
                     List.of(Component.translatable("jei_trade.detail.treasure_map",
                             Component.translatable(trade.displayName))));
         }
-        return null;
+        // Unknown map listings are handled structurally so optional integrations do not need to
+        // depend on a particular mod or call a worldgen-backed getOffer() just to render JEI.
+        return MapTradeListingResolver.resolve(listing, entityType, profession, workstations, level);
     }
 
     private static TradeRecipe definition(ResourceLocation entityType, ResourceLocation profession,
