@@ -18,7 +18,6 @@ import net.minecraft.ChatFormatting;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.item.ItemStack;
-import net.xuwu.jei_trade.Jei_trade;
 import net.xuwu.jei_trade.TradeRecipe;
 import net.xuwu.jei_trade.TradeRecipeGroup;
 
@@ -180,9 +179,4 @@ final class TradeRecipeCategory extends AbstractRecipeCategory<TradeRecipeGroup>
         return Component.translatable("jei_trade.source.merchant");
     }
 
-    @Override
-    public ResourceLocation getRegistryName(TradeRecipeGroup group) {
-        return new ResourceLocation(Jei_trade.MODID,
-                "trade/" + Integer.toHexString(group.fingerprint().hashCode()));
-    }
 }
