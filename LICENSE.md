@@ -1,19 +1,21 @@
-# Don't Be a Jerk License
+MIT License
 
-Copyright 2016 way2muchnoise. All rights reserved.
+Copyright (c) 2026 lingmu0
 
-This computer software code and compiled binaries are licensed for use and redistribution under the “Don't Be a Jerk” non-commercial care-free license.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
 
-You may download, use, redistribute, fork, compile, modify, and include the code or compiled binaries in a modpack. You may fix bugs, add features, adapt it to a modpack, remove items, use portions as examples, and record gameplay or tutorials.
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
 
-This permission applies only while this license remains intact for all original or derived code. Include a copy of this license with the code or provide a link to it.
-
-You may not claim the original code or compiled binaries as your own without permission from the previous author(s).
-
-You may not make or attempt to make money from the code, derivatives, or compiled portions of the code. AdF.ly and similar “click past an ad before downloading” services are prohibited. Derivative works of art, charity events, and commentary or tutorial videos are exceptions.
-
-The author is not liable for damages caused by use of the code or compiled binaries. Make backups.
-
-The author reserves the right to change this license for future revisions. The old version continues to apply to revisions made before a change.
-
-Ultimately, don't be a jerk, play nice, and be polite.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

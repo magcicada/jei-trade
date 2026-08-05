@@ -146,8 +146,8 @@ final class TradeRecipeCategory extends AbstractRecipeCategory<TradeRecipeGroup>
     private static Component professionName(ResourceLocation profession) {
         var professionValue = BuiltInRegistries.VILLAGER_PROFESSION.get(profession);
         if (professionValue != null) {
-            String jerKey = "entity.minecraft.villager." + professionValue;
-            if (ClientLanguage.getInstance().has(jerKey)) return Component.translatable(jerKey);
+            String vanillaKey = "entity.minecraft.villager." + professionValue;
+            if (ClientLanguage.getInstance().has(vanillaKey)) return Component.translatable(vanillaKey);
         }
         for (String key : professionTranslationKeys(profession)) {
             if (ClientLanguage.getInstance().has(key)) return Component.translatable(key);
