@@ -2,7 +2,9 @@ package net.xuwu.jei_trade;
 
 import com.mojang.logging.LogUtils;
 import net.minecraftforge.eventbus.api.IEventBus;
+import net.minecraftforge.fml.ModLoadingContext;
 import net.minecraftforge.fml.common.Mod;
+import net.minecraftforge.fml.config.ModConfig;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 import org.slf4j.Logger;
 
@@ -16,5 +18,6 @@ public final class Jei_trade {
         IEventBus modBus = FMLJavaModLoadingContext.get().getModEventBus();
         TradeNetworking.register();
         Config.register();
+        ModLoadingContext.get().registerConfig(ModConfig.Type.CLIENT, Config.CLIENT_SPEC);
     }
 }

@@ -9,6 +9,7 @@ import mezz.jei.api.recipe.RecipeType;
 import mezz.jei.api.runtime.IJeiRuntime;
 import net.minecraft.resources.ResourceLocation;
 import net.xuwu.jei_trade.ClientTradeCatalog;
+import net.xuwu.jei_trade.Config;
 import net.xuwu.jei_trade.Jei_trade;
 import net.xuwu.jei_trade.TradeRecipeGroup;
 
@@ -47,6 +48,7 @@ public final class TradeJeiPlugin implements IModPlugin {
     @Override
     public void onRuntimeAvailable(IJeiRuntime runtime) {
         recipeManager = runtime.getRecipeManager();
+        hideConfiguredExternalTradeCategories(recipeManager);
         refreshRecipes();
     }
 
@@ -55,6 +57,32 @@ public final class TradeJeiPlugin implements IModPlugin {
         recipeManager = null;
         REGISTERED_RECIPE_GROUPS.clear();
         lastCatalogRevision = Long.MIN_VALUE;
+    }
+
+    private static void hideConfiguredExternalTradeCategories(IRecipeManager manager) {
+        if (!Config.SHOW_JER_VILLAGER_TRADES.get()) {
+            hideTradeCategories(manager, "jeresources");
+        }
+        if (!Config.SHOW_ADVANCED_LOOT_INFO_VILLAGER_TRADES.get()) {
+            hideTradeCategories(manager, "ali");
+        }
+    }
+
+    private static void hideTradeCategories(IRecipeManager manager, String namespace) {
+        List<? extends RecipeType<?>> recipeTypes = manager.createRecipeCategoryLookup()
+                .includeHidden()
+                .get()
+                .filter(category -> {
+                    ResourceLocation uid = category.getRecipeType().getUid();
+                    return namespace.equals(uid.getNamespace()) && isVillagerTradePath(uid.getPath());
+                })
+                .map(category -> category.getRecipeType())
+                .toList();
+        recipeTypes.forEach(manager::hideRecipeCategory);
+    }
+
+    private static boolean isVillagerTradePath(String path) {
+        return path.contains("villager") || path.contains("trade");
     }
 
     public static void refreshRecipes() {

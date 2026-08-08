@@ -118,7 +118,7 @@ final class TradeRecipeCategory extends AbstractRecipeCategory<TradeRecipeGroup>
         for (int index = 0; index < group.trades().size(); index++) {
             TradeRecipe trade = group.trades().get(index);
             int y = HEADER_HEIGHT + index * ROW_HEIGHT;
-            arrow.draw(graphics, 57, y + 2);
+            arrow.draw(graphics, 57, y);
             String level = Component.translatable("jei_trade.level", trade.level()).getString();
             graphics.drawString(minecraft.font, level, 120, y + 2, 0x404040, false);
             graphics.drawString(minecraft.font,
